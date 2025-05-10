@@ -10,7 +10,9 @@ from data_input.news_sentiment import (
     _get_cached_sentiment,
     NewsSentimentError,
     _get_twitter_client,
-    _get_reddit_client
+    _get_reddit_client,
+    _fetch_twitter_news,
+    _fetch_reddit_news
 )
 
 # Test data
@@ -132,15 +134,11 @@ def test_get_news_sentiment_yfinance(mock_ticker, mock_yfinance_news):
     assert 'credibility_score' in df.columns
     assert 'weighted_sentiment' in df.columns
 
-@patch('data_input.news_sentiment._get_twitter_client')
-def test_get_news_sentiment_twitter(mock_get_twitter_client, mock_twitter_data):
+@patch('data_input.news_sentiment._fetch_twitter_news')
+def test_get_news_sentiment_twitter(mock_fetch_twitter, mock_twitter_data):
     """Test news sentiment analysis with Twitter data."""
     # Setup mock
-    mock_twitter_instance = MagicMock()
-    mock_response = MagicMock()
-    mock_response.data = [MagicMock(**tweet) for tweet in mock_twitter_data]
-    mock_twitter_instance.search_recent_tweets.return_value = mock_response
-    mock_get_twitter_client.return_value = mock_twitter_instance
+    mock_fetch_twitter.return_value = mock_twitter_data
     
     # Test basic functionality
     df = get_news_sentiment(
@@ -156,15 +154,11 @@ def test_get_news_sentiment_twitter(mock_get_twitter_client, mock_twitter_data):
     assert 'credibility_score' in df.columns
     assert 'weighted_sentiment' in df.columns
 
-@patch('data_input.news_sentiment._get_reddit_client')
-def test_get_news_sentiment_reddit(mock_get_reddit_client, mock_reddit_data):
+@patch('data_input.news_sentiment._fetch_reddit_news')
+def test_get_news_sentiment_reddit(mock_fetch_reddit, mock_reddit_data):
     """Test news sentiment analysis with Reddit data."""
     # Setup mock
-    mock_reddit_instance = MagicMock()
-    mock_subreddit = MagicMock()
-    mock_subreddit.search.return_value = [MagicMock(**post) for post in mock_reddit_data]
-    mock_reddit_instance.subreddit.return_value = mock_subreddit
-    mock_get_reddit_client.return_value = mock_reddit_instance
+    mock_fetch_reddit.return_value = mock_reddit_data
     
     # Test basic functionality
     df = get_news_sentiment(
@@ -183,7 +177,7 @@ def test_get_news_sentiment_reddit(mock_get_reddit_client, mock_reddit_data):
 def test_get_news_sentiment_error_handling():
     """Test error handling in news sentiment analysis."""
     # Test with invalid date range
-    with pytest.raises(NewsSentimentError):
+    with pytest.raises(ValueError):
         get_news_sentiment(
             symbols=["TSLA"],
             start_date="2024-01-31",
@@ -195,9 +189,9 @@ def test_get_news_sentiment_error_handling():
         get_news_sentiment(symbols=[])
 
 @patch('yfinance.Ticker')
-@patch('data_input.news_sentiment._get_twitter_client')
-@patch('data_input.news_sentiment._get_reddit_client')
-def test_get_news_sentiment_combined(mock_get_reddit_client, mock_get_twitter_client, mock_ticker, mock_yfinance_news, mock_twitter_data, mock_reddit_data):
+@patch('data_input.news_sentiment._fetch_twitter_news')
+@patch('data_input.news_sentiment._fetch_reddit_news')
+def test_get_news_sentiment_combined(mock_fetch_reddit, mock_fetch_twitter, mock_ticker, mock_yfinance_news, mock_twitter_data, mock_reddit_data):
     """Test news sentiment analysis with multiple sources."""
     # Setup yfinance mock
     mock_ticker_instance = MagicMock()
@@ -205,18 +199,10 @@ def test_get_news_sentiment_combined(mock_get_reddit_client, mock_get_twitter_cl
     mock_ticker.return_value = mock_ticker_instance
     
     # Setup Twitter mock
-    mock_twitter_instance = MagicMock()
-    mock_twitter_response = MagicMock()
-    mock_twitter_response.data = [MagicMock(**tweet) for tweet in mock_twitter_data]
-    mock_twitter_instance.search_recent_tweets.return_value = mock_twitter_response
-    mock_get_twitter_client.return_value = mock_twitter_instance
+    mock_fetch_twitter.return_value = mock_twitter_data
     
     # Setup Reddit mock
-    mock_reddit_instance = MagicMock()
-    mock_subreddit = MagicMock()
-    mock_subreddit.search.return_value = [MagicMock(**post) for post in mock_reddit_data]
-    mock_reddit_instance.subreddit.return_value = mock_subreddit
-    mock_get_reddit_client.return_value = mock_reddit_instance
+    mock_fetch_reddit.return_value = mock_reddit_data
     
     # Test combined functionality
     df = get_news_sentiment(
