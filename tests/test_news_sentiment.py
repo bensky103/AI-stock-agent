@@ -118,7 +118,7 @@ def test_get_news_sentiment_yfinance(mock_ticker, mock_yfinance_news):
     
     # Test basic functionality
     df = get_news_sentiment(
-        symbols=["TSLA"],  # Changed to list
+        symbols=["TSLA"],
         start_date="2024-01-01",
         end_date="2024-01-31",
         sources=['news']
@@ -136,13 +136,13 @@ def test_get_news_sentiment_twitter(mock_twitter_client, mock_twitter_data):
     # Setup mock
     mock_twitter_instance = MagicMock()
     mock_response = MagicMock()
-    mock_response.data = mock_twitter_data
+    mock_response.data = [MagicMock(**tweet) for tweet in mock_twitter_data]
     mock_twitter_instance.search_recent_tweets.return_value = mock_response
     mock_twitter_client.return_value = mock_twitter_instance
     
     # Test basic functionality
     df = get_news_sentiment(
-        symbols=["TSLA"],  # Changed to list
+        symbols=["TSLA"],
         start_date="2024-01-01",
         end_date="2024-01-31",
         sources=['twitter']
@@ -160,13 +160,13 @@ def test_get_news_sentiment_reddit(mock_reddit_client, mock_reddit_data):
     # Setup mock
     mock_reddit_instance = MagicMock()
     mock_subreddit = MagicMock()
-    mock_subreddit.search.return_value = [MagicMock(**data) for data in mock_reddit_data]
+    mock_subreddit.search.return_value = [MagicMock(**post) for post in mock_reddit_data]
     mock_reddit_instance.subreddit.return_value = mock_subreddit
     mock_reddit_client.return_value = mock_reddit_instance
     
     # Test basic functionality
     df = get_news_sentiment(
-        symbols=["TSLA"],  # Changed to list
+        symbols=["TSLA"],
         start_date="2024-01-01",
         end_date="2024-01-31",
         sources=['reddit']
@@ -183,7 +183,7 @@ def test_get_news_sentiment_error_handling():
     # Test with invalid date range
     with pytest.raises(NewsSentimentError):
         get_news_sentiment(
-            symbols=["TSLA"],  # Changed to list
+            symbols=["TSLA"],
             start_date="2024-01-31",
             end_date="2024-01-01"  # Invalid date range
         )
@@ -206,20 +206,20 @@ def test_get_news_sentiment_combined():
         # Setup Twitter mock
         mock_twitter_instance = MagicMock()
         mock_twitter_response = MagicMock()
-        mock_twitter_response.data = mock_twitter_data
+        mock_twitter_response.data = [MagicMock(**tweet) for tweet in mock_twitter_data]
         mock_twitter_instance.search_recent_tweets.return_value = mock_twitter_response
         mock_twitter.return_value = mock_twitter_instance
         
         # Setup Reddit mock
         mock_reddit_instance = MagicMock()
         mock_subreddit = MagicMock()
-        mock_subreddit.search.return_value = [MagicMock(**data) for data in mock_reddit_data]
+        mock_subreddit.search.return_value = [MagicMock(**post) for post in mock_reddit_data]
         mock_reddit_instance.subreddit.return_value = mock_subreddit
         mock_reddit.return_value = mock_reddit_instance
         
         # Test combined functionality
         df = get_news_sentiment(
-            symbols=["TSLA"],  # Changed to list
+            symbols=["TSLA"],
             start_date="2024-01-01",
             end_date="2024-01-31",
             sources=['news', 'twitter', 'reddit']
@@ -243,7 +243,7 @@ def test_get_news_sentiment_caching():
         
         # Test with caching enabled
         df1 = get_news_sentiment(
-            symbols=["TSLA"],  # Changed to list
+            symbols=["TSLA"],
             start_date="2024-01-01",
             end_date="2024-01-31",
             sources=['news'],
@@ -252,7 +252,7 @@ def test_get_news_sentiment_caching():
         
         # Test with caching disabled
         df2 = get_news_sentiment(
-            symbols=["TSLA"],  # Changed to list
+            symbols=["TSLA"],
             start_date="2024-01-01",
             end_date="2024-01-31",
             sources=['news'],
