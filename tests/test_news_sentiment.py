@@ -8,7 +8,9 @@ from data_input.news_sentiment import (
     _preprocess_text,
     _calculate_credibility_score,
     _get_cached_sentiment,
-    NewsSentimentError
+    NewsSentimentError,
+    _get_twitter_client,
+    _get_reddit_client
 )
 
 # Test data
@@ -130,15 +132,15 @@ def test_get_news_sentiment_yfinance(mock_ticker, mock_yfinance_news):
     assert 'credibility_score' in df.columns
     assert 'weighted_sentiment' in df.columns
 
-@patch('tweepy.Client')
-def test_get_news_sentiment_twitter(mock_twitter_client, mock_twitter_data):
+@patch('data_input.news_sentiment._get_twitter_client')
+def test_get_news_sentiment_twitter(mock_get_twitter_client, mock_twitter_data):
     """Test news sentiment analysis with Twitter data."""
     # Setup mock
     mock_twitter_instance = MagicMock()
     mock_response = MagicMock()
     mock_response.data = [MagicMock(**tweet) for tweet in mock_twitter_data]
     mock_twitter_instance.search_recent_tweets.return_value = mock_response
-    mock_twitter_client.return_value = mock_twitter_instance
+    mock_get_twitter_client.return_value = mock_twitter_instance
     
     # Test basic functionality
     df = get_news_sentiment(
@@ -154,15 +156,15 @@ def test_get_news_sentiment_twitter(mock_twitter_client, mock_twitter_data):
     assert 'credibility_score' in df.columns
     assert 'weighted_sentiment' in df.columns
 
-@patch('praw.Reddit')
-def test_get_news_sentiment_reddit(mock_reddit_client, mock_reddit_data):
+@patch('data_input.news_sentiment._get_reddit_client')
+def test_get_news_sentiment_reddit(mock_get_reddit_client, mock_reddit_data):
     """Test news sentiment analysis with Reddit data."""
     # Setup mock
     mock_reddit_instance = MagicMock()
     mock_subreddit = MagicMock()
     mock_subreddit.search.return_value = [MagicMock(**post) for post in mock_reddit_data]
     mock_reddit_instance.subreddit.return_value = mock_subreddit
-    mock_reddit_client.return_value = mock_reddit_instance
+    mock_get_reddit_client.return_value = mock_reddit_instance
     
     # Test basic functionality
     df = get_news_sentiment(
@@ -192,74 +194,73 @@ def test_get_news_sentiment_error_handling():
     with pytest.raises(NewsSentimentError):
         get_news_sentiment(symbols=[])
 
-def test_get_news_sentiment_combined():
+@patch('yfinance.Ticker')
+@patch('data_input.news_sentiment._get_twitter_client')
+@patch('data_input.news_sentiment._get_reddit_client')
+def test_get_news_sentiment_combined(mock_get_reddit_client, mock_get_twitter_client, mock_ticker, mock_yfinance_news, mock_twitter_data, mock_reddit_data):
     """Test news sentiment analysis with multiple sources."""
-    with patch('yfinance.Ticker') as mock_ticker, \
-         patch('tweepy.Client') as mock_twitter, \
-         patch('praw.Reddit') as mock_reddit:
-        
-        # Setup yfinance mock
-        mock_ticker_instance = MagicMock()
-        mock_ticker_instance.news = mock_yfinance_news
-        mock_ticker.return_value = mock_ticker_instance
-        
-        # Setup Twitter mock
-        mock_twitter_instance = MagicMock()
-        mock_twitter_response = MagicMock()
-        mock_twitter_response.data = [MagicMock(**tweet) for tweet in mock_twitter_data]
-        mock_twitter_instance.search_recent_tweets.return_value = mock_twitter_response
-        mock_twitter.return_value = mock_twitter_instance
-        
-        # Setup Reddit mock
-        mock_reddit_instance = MagicMock()
-        mock_subreddit = MagicMock()
-        mock_subreddit.search.return_value = [MagicMock(**post) for post in mock_reddit_data]
-        mock_reddit_instance.subreddit.return_value = mock_subreddit
-        mock_reddit.return_value = mock_reddit_instance
-        
-        # Test combined functionality
-        df = get_news_sentiment(
-            symbols=["TSLA"],
-            start_date="2024-01-01",
-            end_date="2024-01-31",
-            sources=['news', 'twitter', 'reddit']
-        )
-        
-        assert isinstance(df, pd.DataFrame)
-        assert not df.empty
-        assert len(df['source'].unique()) == 3  # Should have data from all sources
-        assert 'sentiment_score' in df.columns
-        assert 'credibility_score' in df.columns
-        assert 'weighted_sentiment' in df.columns
-        assert 'sentiment_category' in df.columns
+    # Setup yfinance mock
+    mock_ticker_instance = MagicMock()
+    mock_ticker_instance.news = mock_yfinance_news
+    mock_ticker.return_value = mock_ticker_instance
+    
+    # Setup Twitter mock
+    mock_twitter_instance = MagicMock()
+    mock_twitter_response = MagicMock()
+    mock_twitter_response.data = [MagicMock(**tweet) for tweet in mock_twitter_data]
+    mock_twitter_instance.search_recent_tweets.return_value = mock_twitter_response
+    mock_get_twitter_client.return_value = mock_twitter_instance
+    
+    # Setup Reddit mock
+    mock_reddit_instance = MagicMock()
+    mock_subreddit = MagicMock()
+    mock_subreddit.search.return_value = [MagicMock(**post) for post in mock_reddit_data]
+    mock_reddit_instance.subreddit.return_value = mock_subreddit
+    mock_get_reddit_client.return_value = mock_reddit_instance
+    
+    # Test combined functionality
+    df = get_news_sentiment(
+        symbols=["TSLA"],
+        start_date="2024-01-01",
+        end_date="2024-01-31",
+        sources=['news', 'twitter', 'reddit']
+    )
+    
+    assert isinstance(df, pd.DataFrame)
+    assert not df.empty
+    assert len(df['source'].unique()) == 3  # Should have data from all sources
+    assert 'sentiment_score' in df.columns
+    assert 'credibility_score' in df.columns
+    assert 'weighted_sentiment' in df.columns
+    assert 'sentiment_category' in df.columns
 
-def test_get_news_sentiment_caching():
+@patch('yfinance.Ticker')
+def test_get_news_sentiment_caching(mock_ticker, mock_yfinance_news):
     """Test sentiment caching functionality."""
-    with patch('yfinance.Ticker') as mock_ticker:
-        # Setup mock
-        mock_ticker_instance = MagicMock()
-        mock_ticker_instance.news = mock_yfinance_news
-        mock_ticker.return_value = mock_ticker_instance
-        
-        # Test with caching enabled
-        df1 = get_news_sentiment(
-            symbols=["TSLA"],
-            start_date="2024-01-01",
-            end_date="2024-01-31",
-            sources=['news'],
-            use_cache=True
-        )
-        
-        # Test with caching disabled
-        df2 = get_news_sentiment(
-            symbols=["TSLA"],
-            start_date="2024-01-01",
-            end_date="2024-01-31",
-            sources=['news'],
-            use_cache=False
-        )
-        
-        assert isinstance(df1, pd.DataFrame)
-        assert isinstance(df2, pd.DataFrame)
-        assert not df1.empty
-        assert not df2.empty 
+    # Setup mock
+    mock_ticker_instance = MagicMock()
+    mock_ticker_instance.news = mock_yfinance_news
+    mock_ticker.return_value = mock_ticker_instance
+    
+    # Test with caching enabled
+    df1 = get_news_sentiment(
+        symbols=["TSLA"],
+        start_date="2024-01-01",
+        end_date="2024-01-31",
+        sources=['news'],
+        use_cache=True
+    )
+    
+    # Test with caching disabled
+    df2 = get_news_sentiment(
+        symbols=["TSLA"],
+        start_date="2024-01-01",
+        end_date="2024-01-31",
+        sources=['news'],
+        use_cache=False
+    )
+    
+    assert isinstance(df1, pd.DataFrame)
+    assert isinstance(df2, pd.DataFrame)
+    assert not df1.empty
+    assert not df2.empty 
