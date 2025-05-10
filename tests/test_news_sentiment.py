@@ -118,7 +118,7 @@ def test_get_news_sentiment_yfinance(mock_ticker, mock_yfinance_news):
     
     # Test basic functionality
     df = get_news_sentiment(
-        symbols="TSLA",
+        symbols=["TSLA"],  # Changed to list
         start_date="2024-01-01",
         end_date="2024-01-31",
         sources=['news']
@@ -142,7 +142,7 @@ def test_get_news_sentiment_twitter(mock_twitter_client, mock_twitter_data):
     
     # Test basic functionality
     df = get_news_sentiment(
-        symbols="TSLA",
+        symbols=["TSLA"],  # Changed to list
         start_date="2024-01-01",
         end_date="2024-01-31",
         sources=['twitter']
@@ -166,7 +166,7 @@ def test_get_news_sentiment_reddit(mock_reddit_client, mock_reddit_data):
     
     # Test basic functionality
     df = get_news_sentiment(
-        symbols="TSLA",
+        symbols=["TSLA"],  # Changed to list
         start_date="2024-01-01",
         end_date="2024-01-31",
         sources=['reddit']
@@ -181,9 +181,9 @@ def test_get_news_sentiment_reddit(mock_reddit_client, mock_reddit_data):
 def test_get_news_sentiment_error_handling():
     """Test error handling in news sentiment analysis."""
     # Test with invalid date range
-    with pytest.raises(ValueError):
+    with pytest.raises(NewsSentimentError):
         get_news_sentiment(
-            symbols="TSLA",
+            symbols=["TSLA"],  # Changed to list
             start_date="2024-01-31",
             end_date="2024-01-01"  # Invalid date range
         )
@@ -219,7 +219,7 @@ def test_get_news_sentiment_combined():
         
         # Test combined functionality
         df = get_news_sentiment(
-            symbols="TSLA",
+            symbols=["TSLA"],  # Changed to list
             start_date="2024-01-01",
             end_date="2024-01-31",
             sources=['news', 'twitter', 'reddit']
@@ -243,7 +243,7 @@ def test_get_news_sentiment_caching():
         
         # Test with caching enabled
         df1 = get_news_sentiment(
-            symbols="TSLA",
+            symbols=["TSLA"],  # Changed to list
             start_date="2024-01-01",
             end_date="2024-01-31",
             sources=['news'],
@@ -252,7 +252,7 @@ def test_get_news_sentiment_caching():
         
         # Test with caching disabled
         df2 = get_news_sentiment(
-            symbols="TSLA",
+            symbols=["TSLA"],  # Changed to list
             start_date="2024-01-01",
             end_date="2024-01-31",
             sources=['news'],
