@@ -3,3 +3,9 @@ pyyaml
 yfinance
 pytest
 pytest-mock
+textblob
+nltk
+python-dotenv
+requests
+tweepy
+praw
