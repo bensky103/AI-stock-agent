@@ -112,7 +112,9 @@ def test_cached_sentiment():
 def test_get_news_sentiment_yfinance(mock_ticker, mock_yfinance_news):
     """Test news sentiment analysis with yfinance data."""
     # Setup mock
-    mock_ticker.return_value.news = mock_yfinance_news
+    mock_ticker_instance = MagicMock()
+    mock_ticker_instance.news = mock_yfinance_news
+    mock_ticker.return_value = mock_ticker_instance
     
     # Test basic functionality
     df = get_news_sentiment(
@@ -132,7 +134,11 @@ def test_get_news_sentiment_yfinance(mock_ticker, mock_yfinance_news):
 def test_get_news_sentiment_twitter(mock_twitter_client, mock_twitter_data):
     """Test news sentiment analysis with Twitter data."""
     # Setup mock
-    mock_twitter_client.return_value.search_recent_tweets.return_value.data = mock_twitter_data
+    mock_twitter_instance = MagicMock()
+    mock_response = MagicMock()
+    mock_response.data = mock_twitter_data
+    mock_twitter_instance.search_recent_tweets.return_value = mock_response
+    mock_twitter_client.return_value = mock_twitter_instance
     
     # Test basic functionality
     df = get_news_sentiment(
@@ -152,9 +158,11 @@ def test_get_news_sentiment_twitter(mock_twitter_client, mock_twitter_data):
 def test_get_news_sentiment_reddit(mock_reddit_client, mock_reddit_data):
     """Test news sentiment analysis with Reddit data."""
     # Setup mock
+    mock_reddit_instance = MagicMock()
     mock_subreddit = MagicMock()
-    mock_subreddit.search.return_value = mock_reddit_data
-    mock_reddit_client.return_value.subreddit.return_value = mock_subreddit
+    mock_subreddit.search.return_value = [MagicMock(**data) for data in mock_reddit_data]
+    mock_reddit_instance.subreddit.return_value = mock_subreddit
+    mock_reddit_client.return_value = mock_reddit_instance
     
     # Test basic functionality
     df = get_news_sentiment(
@@ -173,7 +181,7 @@ def test_get_news_sentiment_reddit(mock_reddit_client, mock_reddit_data):
 def test_get_news_sentiment_error_handling():
     """Test error handling in news sentiment analysis."""
     # Test with invalid date range
-    with pytest.raises(NewsSentimentError):
+    with pytest.raises(ValueError):
         get_news_sentiment(
             symbols="TSLA",
             start_date="2024-01-31",
@@ -190,12 +198,24 @@ def test_get_news_sentiment_combined():
          patch('tweepy.Client') as mock_twitter, \
          patch('praw.Reddit') as mock_reddit:
         
-        # Setup mocks
-        mock_ticker.return_value.news = mock_yfinance_news
-        mock_twitter.return_value.search_recent_tweets.return_value.data = mock_twitter_data
+        # Setup yfinance mock
+        mock_ticker_instance = MagicMock()
+        mock_ticker_instance.news = mock_yfinance_news
+        mock_ticker.return_value = mock_ticker_instance
+        
+        # Setup Twitter mock
+        mock_twitter_instance = MagicMock()
+        mock_twitter_response = MagicMock()
+        mock_twitter_response.data = mock_twitter_data
+        mock_twitter_instance.search_recent_tweets.return_value = mock_twitter_response
+        mock_twitter.return_value = mock_twitter_instance
+        
+        # Setup Reddit mock
+        mock_reddit_instance = MagicMock()
         mock_subreddit = MagicMock()
-        mock_subreddit.search.return_value = mock_reddit_data
-        mock_reddit.return_value.subreddit.return_value = mock_subreddit
+        mock_subreddit.search.return_value = [MagicMock(**data) for data in mock_reddit_data]
+        mock_reddit_instance.subreddit.return_value = mock_subreddit
+        mock_reddit.return_value = mock_reddit_instance
         
         # Test combined functionality
         df = get_news_sentiment(
@@ -216,7 +236,10 @@ def test_get_news_sentiment_combined():
 def test_get_news_sentiment_caching():
     """Test sentiment caching functionality."""
     with patch('yfinance.Ticker') as mock_ticker:
-        mock_ticker.return_value.news = mock_yfinance_news
+        # Setup mock
+        mock_ticker_instance = MagicMock()
+        mock_ticker_instance.news = mock_yfinance_news
+        mock_ticker.return_value = mock_ticker_instance
         
         # Test with caching enabled
         df1 = get_news_sentiment(
