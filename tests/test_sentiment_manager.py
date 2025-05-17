@@ -181,7 +181,8 @@ def test_sentiment_aggregation(mock_config):
                 datetime.now(pytz.UTC) - timedelta(hours=12)
             ],
             'sentiment_score': [0.5, -0.3, 0.2, 0.4],
-            'engagement_score': [100, 50, 80, 60]
+            'engagement_score': [100, 50, 80, 60],
+            'source': ['twitter', 'twitter', 'reddit', 'reddit']
         })
         
         result = manager._aggregate_sentiment(data)
