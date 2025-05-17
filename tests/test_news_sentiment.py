@@ -287,7 +287,8 @@ def test_get_aggregate_sentiment():
                 'sentiment_score': 0.5,
                 'subjectivity': 0.6,
                 'title': f'News {i}',
-                'weighted_sentiment': 0.5  # Added for test compatibility
+                'weighted_sentiment': 0.5,  # Added for test compatibility
+                'credibility_score': 1.0    # Added for test compatibility
             } for i in range(3)
         ])
     
@@ -307,7 +308,7 @@ def test_get_aggregate_sentiment():
     assert len(agg_df_hourly) == len(dates)
     
     # Test with empty DataFrame
-    empty_df = pd.DataFrame(columns=['symbol', 'datetime', 'sentiment_score', 'subjectivity', 'title', 'weighted_sentiment'])
+    empty_df = pd.DataFrame(columns=['symbol', 'datetime', 'sentiment_score', 'subjectivity', 'title', 'weighted_sentiment', 'credibility_score'])
     with pytest.raises(NewsSentimentError):
         get_aggregate_sentiment(empty_df)
 
@@ -334,27 +335,21 @@ def test_get_news_sentiment_edge_cases():
 def test_get_news_sentiment_invalid_sources():
     """Test news sentiment analysis with invalid sources."""
     # Test with invalid source
-    try:
+    with pytest.raises(ValueError):
         get_news_sentiment(
             symbols=["TSLA"],
             start_date="2024-01-01",
             end_date="2024-01-31",
             sources=['invalid_source']
         )
-        assert True
-    except ValueError:
-        assert True
     # Test with empty sources list
-    try:
+    with pytest.raises(ValueError):
         get_news_sentiment(
             symbols=["TSLA"],
             start_date="2024-01-01",
             end_date="2024-01-31",
             sources=[]
         )
-        assert True
-    except ValueError:
-        assert True
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
