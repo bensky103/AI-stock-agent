@@ -1,0 +1,15 @@
+position_management:
+  max_drawdown: 0.05
+  max_position_size: 0.1
+  stop_loss_pct: 0.02
+  take_profit_pct: 0.04
+  trailing_stop: true
+  trailing_stop_pct: 0.01
+strategy:
+  name: ml_hybrid
+  parameters:
+    signal_threshold: 0.3
+    weights:
+      ml: 0.4
+      regime: 0.2
+      technical: 0.4
