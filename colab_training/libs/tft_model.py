@@ -1,0 +1,831 @@
+"""Temporal Fusion Transformer Model.
+
+This module implements the Temporal Fusion Transformer model for time series
+forecasting, as described in the paper:
+"Temporal Fusion Transformers for Interpretable Multi-horizon Time Series Forecasting"
+by Bryan Lim, Sercan Arik, Nicolas Loeff and Tomas Pfister.
+
+Paper link: https://arxiv.org/pdf/1912.09363.pdf
+"""
+
+import os
+import json
+import logging
+import numpy as np
+import pandas as pd
+import tensorflow as tf
+from tensorflow.keras import layers, Model
+from typing import Dict, List, Tuple, Optional, Union, TYPE_CHECKING
+from tensorflow.keras.layers import Concatenate
+
+# Configure logger
+logger = logging.getLogger(__name__)
+
+# Import our data formatter - using absolute imports
+from colab_training.data_formatters.base import InputTypes, GenericDataFormatter
+from colab_training.data_formatters.stock_formatter import StockFormatter
+
+# Layer definitions
+concat = tf.keras.backend.concatenate
+stack = tf.keras.backend.stack
+K = tf.keras.backend
+Add = layers.Add
+LayerNorm = layers.LayerNormalization
+Dense = layers.Dense
+Multiply = layers.Multiply
+Dropout = layers.Dropout
+Activation = layers.Activation
+Lambda = layers.Lambda
+
+def linear_layer(size: int, activation: Optional[str] = None, 
+                use_time_distributed: bool = False, use_bias: bool = True):
+    """Returns simple Keras linear layer.
+    
+    Args:
+        size: Output size
+        activation: Activation function to apply if required
+        use_time_distributed: Whether to apply layer across time
+        use_bias: Whether bias should be included in layer
+    """
+    def layer_fn(x):
+        if use_time_distributed and len(x.shape) == 3:
+            return layers.TimeDistributed(Dense(size, activation=activation, use_bias=use_bias))(x)
+        else:
+            return Dense(size, activation=activation, use_bias=use_bias)(x)
+    return layer_fn
+
+def apply_mlp(inputs, hidden_size: int, output_size: int,
+              output_activation: Optional[str] = None,
+              hidden_activation: str = 'tanh',
+              use_time_distributed: bool = False):
+    """Applies simple feed-forward network to an input.
+    
+    Args:
+        inputs: MLP inputs
+        hidden_size: Hidden state size
+        output_size: Output size of MLP
+        output_activation: Activation function to apply on output
+        hidden_activation: Activation function to apply on input
+        use_time_distributed: Whether to apply across time
+    """
+    if use_time_distributed:
+        hidden = layers.TimeDistributed(
+            Dense(hidden_size, activation=hidden_activation))(inputs)
+        return layers.TimeDistributed(
+            Dense(output_size, activation=output_activation))(hidden)
+    else:
+        hidden = Dense(hidden_size, activation=hidden_activation)(inputs)
+        return Dense(output_size, activation=output_activation)(hidden)
+
+def apply_gating_layer(x, hidden_layer_size: int, dropout_rate: Optional[float] = None,
+                      use_time_distributed: bool = True, activation: Optional[str] = None):
+    """Applies a Gated Linear Unit (GLU) to an input.
+    
+    Args:
+        x: Input to gating layer
+        hidden_layer_size: Dimension of GLU
+        dropout_rate: Dropout rate to apply if any
+        use_time_distributed: Whether to apply across time
+        activation: Activation function to apply to the linear feature transform
+    """
+    if dropout_rate is not None:
+        x = Dropout(dropout_rate)(x)
+
+    if use_time_distributed:
+        activation_layer = layers.TimeDistributed(
+            Dense(hidden_layer_size, activation=activation))(x)
+        gated_layer = layers.TimeDistributed(
+            Dense(hidden_layer_size, activation='sigmoid'))(x)
+    else:
+        activation_layer = Dense(hidden_layer_size, activation=activation)(x)
+        gated_layer = Dense(hidden_layer_size, activation='sigmoid')(x)
+
+    return Multiply()([activation_layer, gated_layer]), gated_layer
+
+def add_and_norm(x_list):
+    """Applies skip connection followed by layer normalisation.
+    
+    Args:
+        x_list: List of inputs to sum for skip connection
+    """
+    tmp = Add()(x_list)
+    tmp = LayerNorm()(tmp)
+    return tmp
+
+def gated_residual_network(x, hidden_layer_size: int, output_size: Optional[int] = None,
+                          dropout_rate: Optional[float] = None, use_time_distributed: bool = True,
+                          additional_context: Optional[tf.Tensor] = None, return_gate: bool = False):
+    """Applies the gated residual network (GRN) as defined in paper.
+    
+    Args:
+        x: Network inputs
+        hidden_layer_size: Internal state size
+        output_size: Size of output layer
+        dropout_rate: Dropout rate if dropout is applied
+        use_time_distributed: Whether to apply network across time dimension
+        additional_context: Additional context vector to use if relevant
+        return_gate: Whether to return GLU gate for diagnostic purposes
+    """
+    # Always project skip connection to hidden_layer_size if needed
+    input_size = x.shape[-1]
+    if input_size != hidden_layer_size:
+        linear = Dense(hidden_layer_size)
+        if use_time_distributed:
+            linear = layers.TimeDistributed(linear)
+        skip = linear(x)
+    else:
+        skip = x
+
+    # Apply feedforward network
+    hidden = linear_layer(hidden_layer_size, activation=None,
+                         use_time_distributed=use_time_distributed)(x)
+
+    if additional_context is not None:
+        # Handle dimension mismatch for additional context
+        if use_time_distributed and len(x.shape) == 3 and len(additional_context.shape) == 2:
+            # Create a Lambda layer to expand static context to match temporal dimensions
+            def expand_static_context(inputs):
+                x_tensor, context_tensor = inputs
+                time_steps = tf.shape(x_tensor)[1]
+                # Expand dims and tile across time
+                context_expanded = tf.expand_dims(context_tensor, axis=1)
+                context_tiled = tf.tile(context_expanded, [1, time_steps, 1])
+                return context_tiled
+            
+            additional_context = Lambda(expand_static_context)([x, additional_context])
+        
+        context_projection = linear_layer(hidden_layer_size, activation=None,
+                                        use_time_distributed=use_time_distributed,
+                                        use_bias=False)(additional_context)
+        hidden = hidden + context_projection
+
+    hidden = Activation('elu')(hidden)
+    hidden = linear_layer(hidden_layer_size, activation=None,
+                         use_time_distributed=use_time_distributed)(hidden)
+
+    # Apply dropout if specified
+    if dropout_rate is not None:
+        hidden = Dropout(dropout_rate)(hidden)
+
+    # Apply GLU
+    hidden, gate = apply_gating_layer(hidden, hidden_layer_size,
+                                    dropout_rate=None,
+                                    use_time_distributed=use_time_distributed,
+                                    activation=None)
+
+    # Apply skip connection
+    if return_gate:
+        return add_and_norm([skip, hidden]), gate
+    else:
+        return add_and_norm([skip, hidden])
+
+class InterpretableMultiHeadAttention(layers.Layer):
+    """Defines interpretable multi-head attention layer.
+    
+    Attributes:
+        n_head: Number of attention heads
+        d_model: Dimension of model
+        dropout: Dropout rate to apply
+        output_size: Output size of layer
+    """
+    
+    def __init__(self, n_head: int, d_model: int, dropout: float):
+        """Initialize attention layer.
+        
+        Args:
+            n_head: Number of attention heads
+            d_model: Dimension of model
+            dropout: Dropout rate to apply
+        """
+        super(InterpretableMultiHeadAttention, self).__init__()
+        
+        self.n_head = n_head
+        self.d_model = d_model
+        self.dropout = dropout
+        
+        self.qs_layer = Dense(n_head * d_model, use_bias=False)
+        self.ks_layer = Dense(n_head * d_model, use_bias=False)
+        self.vs_layer = Dense(n_head * d_model, use_bias=False)
+        
+        self.attention_dropout = Dropout(dropout)
+        self.w_o = Dense(d_model, use_bias=False)
+        
+        self.layer_norm = LayerNorm()
+        self.dropout_layer = Dropout(dropout)
+        
+    def build(self, input_shape):
+        """Builds the attention layer.
+        
+        Args:
+            input_shape: Shape of input tensor
+        """
+        # Remove the unused weight variable since we're not using interpretable attention
+        # self.w = self.add_weight(name='w',
+        #                         shape=(self.n_head, 1, 1),
+        #                         initializer='ones',
+        #                         trainable=True)
+        super(InterpretableMultiHeadAttention, self).build(input_shape)
+        
+    def call(self, q, k, v, mask=None):
+        """Applies attention mechanism to inputs.
+        
+        Args:
+            q: Query tensor
+            k: Key tensor
+            v: Value tensor
+            mask: Mask to apply if any
+            
+        Returns:
+            Tensor output from attention layer
+        """
+        # Reshape inputs
+        batch_size = tf.shape(q)[0]
+        
+        # Linear layers
+        qs = self.qs_layer(q)  # [batch_size, len_q, n_head * d_model]
+        ks = self.ks_layer(k)
+        vs = self.vs_layer(v)
+        
+        # Reshape to [batch_size, len_q, n_head, d_model]
+        qs = tf.reshape(qs, [batch_size, -1, self.n_head, self.d_model])
+        ks = tf.reshape(ks, [batch_size, -1, self.n_head, self.d_model])
+        vs = tf.reshape(vs, [batch_size, -1, self.n_head, self.d_model])
+        
+        # Transpose for attention
+        qs = tf.transpose(qs, [0, 2, 1, 3])  # [batch_size, n_head, len_q, d_model]
+        ks = tf.transpose(ks, [0, 2, 1, 3])  # [batch_size, n_head, len_k, d_model]
+        vs = tf.transpose(vs, [0, 2, 1, 3])  # [batch_size, n_head, len_v, d_model]
+        
+        # Scaled dot-product attention
+        outputs = tf.matmul(qs, ks, transpose_b=True)  # [batch_size, n_head, len_q, len_k]
+        outputs = outputs / (self.d_model ** 0.5)
+        
+        if mask is not None:
+            outputs = outputs * mask
+            
+        # Apply softmax
+        outputs = tf.nn.softmax(outputs)
+        outputs = self.attention_dropout(outputs)
+        
+        # Apply attention weights
+        outputs = tf.matmul(outputs, vs)  # [batch_size, n_head, len_q, d_model]
+        
+        # Reshape and apply final linear layer
+        outputs = tf.transpose(outputs, [0, 2, 1, 3])  # [batch_size, len_q, n_head, d_model]
+        outputs = tf.reshape(outputs, [batch_size, -1, self.n_head * self.d_model])
+        outputs = self.w_o(outputs)
+        
+        # Apply dropout and layer norm
+        outputs = self.dropout_layer(outputs)
+        outputs = self.layer_norm(outputs)
+        
+        return outputs
+
+class TFTModel:
+    """Temporal Fusion Transformer model for time series forecasting.
+    
+    This class implements the TFT model architecture as described in the paper.
+    It includes methods for training, evaluation, and prediction.
+    """
+    
+    def __init__(self, config: Dict):
+        """Initialize TFT model.
+        
+        Args:
+            config: Dictionary of model configuration parameters.
+        """
+        # Import here to avoid circular dependency
+        from colab_training.data_formatters.stock_formatter import StockFormatter
+        
+        self.config = config
+        self.data_formatter = StockFormatter()
+        
+        # Model parameters
+        self.hidden_layer_size = config.get('hidden_layer_size', 64)
+        self.attention_head_size = config.get('attention_head_size', 4)
+        self.dropout_rate = config.get('dropout_rate', 0.1)
+        self.max_gradient_norm = config.get('max_gradient_norm', 0.01)
+        self.learning_rate = config.get('learning_rate', 0.001)
+        self.minibatch_size = config.get('minibatch_size', 64)
+        self.num_epochs = config.get('num_epochs', 100)
+        self.early_stopping_patience = config.get('early_stopping_patience', 10)
+        self.num_encoder_steps = config.get('num_encoder_steps', 100)
+        self.num_steps = config.get('num_steps', 20)
+        self.context_lengths = config.get('context_lengths', [1, 7, 14, 30])
+        
+        # Add training state tracking
+        self.best_val_loss = float('inf')
+        self.best_epoch = 0
+        self.patience_counter = 0
+        self.training_history = []
+        
+        # Initialize model
+        self.model = None
+        self._build_model()
+    
+    def _build_model(self):
+        """Build the TFT model architecture."""
+        # Calculate input sizes based on column definitions
+        static_cols = [col for col, type_ in self.data_formatter.column_definition 
+                      if type_ == InputTypes.STATIC]
+        historical_cols = [col for col, type_ in self.data_formatter.column_definition
+                          if type_ in [InputTypes.TARGET, InputTypes.OBSERVED, InputTypes.KNOWN]]
+        future_cols = [col for col, type_ in self.data_formatter.column_definition
+                      if type_ == InputTypes.KNOWN]
+        
+        # Define inputs
+        # Static inputs
+        static_inputs = layers.Input(shape=(len(static_cols),),
+                                   name='static_inputs')
+        
+        # Time-varying inputs
+        historical_inputs = layers.Input(
+            shape=(self.num_encoder_steps, len(historical_cols)),
+            name='historical_inputs')
+        future_inputs = layers.Input(
+            shape=(self.num_steps, len(future_cols)),
+            name='future_inputs')
+        
+        # Static context
+        static_context = gated_residual_network(
+            static_inputs,
+            self.hidden_layer_size,
+            dropout_rate=self.dropout_rate,
+            use_time_distributed=False,
+            additional_context=None)
+        
+        # Historical context
+        historical_context = gated_residual_network(
+            historical_inputs,
+            self.hidden_layer_size,
+            dropout_rate=self.dropout_rate,
+            use_time_distributed=True,
+            additional_context=None)
+        
+        # Future context
+        future_context = gated_residual_network(
+            future_inputs,
+            self.hidden_layer_size,
+            dropout_rate=self.dropout_rate,
+            use_time_distributed=True,
+            additional_context=None)
+        
+        # LSTM for local processing
+        lstm_output = layers.LSTM(
+            self.hidden_layer_size,
+            return_sequences=True,
+            dropout=self.dropout_rate
+        )(historical_context)
+        
+        # Static enrichment
+        enriched_context = gated_residual_network(
+            lstm_output,
+            self.hidden_layer_size,
+            dropout_rate=self.dropout_rate,
+            use_time_distributed=True,
+            additional_context=static_context)
+        
+        # Temporal self-attention
+        attention_output = InterpretableMultiHeadAttention(
+            self.attention_head_size,
+            self.hidden_layer_size,
+            self.dropout_rate)(enriched_context, enriched_context, enriched_context)
+        
+        # Temporal processing
+        temporal_output = gated_residual_network(
+            attention_output,
+            self.hidden_layer_size,
+            dropout_rate=self.dropout_rate,
+            use_time_distributed=True,
+            additional_context=None)
+        
+        # Future processing
+        future_processed = gated_residual_network(
+            future_context,
+            self.hidden_layer_size,
+            dropout_rate=self.dropout_rate,
+            use_time_distributed=True,
+            additional_context=None)
+        
+        # Combine temporal and future contexts
+        combined_context = Concatenate(axis=1)([temporal_output, future_processed])
+        
+        # Final processing
+        final_output = gated_residual_network(
+            combined_context,
+            self.hidden_layer_size,
+            dropout_rate=self.dropout_rate,
+            use_time_distributed=True,
+            additional_context=None)
+        
+        # Output layer
+        output = Dense(1)(final_output)
+        
+        # Create model
+        self.model = Model(
+            inputs=[static_inputs, historical_inputs, future_inputs],
+            outputs=output)
+        
+        # Compile model with gradient clipping
+        optimizer = tf.keras.optimizers.Adam(
+            learning_rate=self.learning_rate,
+            clipnorm=self.max_gradient_norm  # Add gradient clipping
+        )
+        
+        self.model.compile(
+            optimizer=optimizer,
+            loss='mse',
+            metrics=['mae'])
+        
+        return self.model
+    
+    def _get_single_col_by_type(self, type_: 'InputTypes') -> str:
+        """Gets the name of a single column of a specific type.
+        
+        Args:
+            type_: Type of column to get
+            
+        Returns:
+            Name of column
+        """
+        # Import here to avoid circular dependency
+        from colab_training.data_formatters.base import InputTypes
+        
+        cols = [tup[0] for tup in self.data_formatter.column_definition 
+                if tup[1] == type_]
+        if len(cols) != 1:
+            raise ValueError(f"Expected exactly one column of type {type_}, got {len(cols)}")
+        return cols[0]
+
+    def _validate_and_normalize_data(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Validate and normalize input data to prevent NaN values."""
+        
+        # Check if data is already normalized using a more robust check
+        if hasattr(df, '_is_normalized') and df._is_normalized:
+            logger.info("Data already normalized, skipping...")
+            return df
+            
+        logger.info("Validating and normalizing data...")
+        
+        # Create a copy to avoid modifying original
+        df_clean = df.copy()
+        
+        # Store normalization parameters globally for model instance
+        if not hasattr(self, 'normalization_params'):
+            self.normalization_params = {}
+        
+        # Convert all numeric columns to float
+        numeric_cols = df_clean.select_dtypes(include=[np.number]).columns
+        for col in numeric_cols:
+            df_clean[col] = df_clean[col].astype(float)
+        
+        # Store normalization parameters for denormalization later
+        if not hasattr(self, 'target_scaler'):
+            self.target_scaler = {
+                'min': df_clean['close'].min(),
+                'max': df_clean['close'].max()
+            }
+        
+        # More efficient NaN handling
+        if df_clean.isnull().any().any():
+            logger.warning("Found NaN values, filling...")
+            # Forward fill then backward fill, then fill remaining with median
+            df_clean = df_clean.ffill().bfill()
+            
+            # For any remaining NaN, fill with column median
+            for col in df_clean.columns:
+                if df_clean[col].isnull().any():
+                    df_clean[col] = df_clean[col].fillna(df_clean[col].median())
+        
+        # Remove rows if any NaN still exists
+        if df_clean.isnull().any().any():
+            initial_rows = len(df_clean)
+            df_clean = df_clean.dropna()
+            removed_rows = initial_rows - len(df_clean)
+            if removed_rows > 0:
+                logger.warning(f"Removed {removed_rows} rows with NaN values")
+        
+        # Normalize and store parameters for consistency
+        self._normalize_with_stored_params(df_clean)
+        
+        # Mark as normalized
+        df_clean._is_normalized = True
+        
+        logger.info("Data normalization complete")
+        return df_clean
+    
+    def _normalize_with_stored_params(self, df: pd.DataFrame):
+        """Normalize using stored parameters for consistency across train/val/test."""
+        
+        # Price columns
+        price_cols = ['open', 'high', 'low', 'close', 'volume']
+        for col in price_cols:
+            if col in df.columns:
+                if col not in self.normalization_params:
+                    self.normalization_params[col] = {
+                        'min': df[col].min(),
+                        'max': df[col].max()
+                    }
+                
+                col_min = self.normalization_params[col]['min']
+                col_max = self.normalization_params[col]['max']
+                
+                if col_max > col_min:
+                    df[col] = (df[col] - col_min) / (col_max - col_min)
+                else:
+                    df[col] = 0.5
+        
+        # Technical indicators
+        tech_cols = [col for col in df.columns if col.startswith(('rsi', 'macd', 'bb_', 'atr', 'volume_', 'ema_', 'sma_', 'returns', 'log_returns', 'volatility', 'momentum_', 'price_range', 'trend'))]
+        for col in tech_cols:
+            if col in df.columns:
+                if col not in self.normalization_params:
+                    self.normalization_params[col] = {
+                        'min': df[col].min(),
+                        'max': df[col].max()
+                    }
+                
+                col_min = self.normalization_params[col]['min']
+                col_max = self.normalization_params[col]['max']
+                
+                if col_max > col_min:
+                    df[col] = (df[col] - col_min) / (col_max - col_min)
+                else:
+                    df[col] = 0.5
+
+    def _prepare_inputs(self, df: pd.DataFrame) -> tuple:
+        """Prepare inputs for the model from DataFrame"""
+        logger.info("Preparing model inputs...")
+        
+        # First validate and normalize the data
+        df = self._validate_and_normalize_data(df)
+        
+        # Get column information from data formatter
+        static_cols = [col for col, type_ in self.data_formatter.column_definition 
+                      if type_ == InputTypes.STATIC]
+        historical_cols = [col for col, type_ in self.data_formatter.column_definition
+                          if type_ in [InputTypes.TARGET, InputTypes.OBSERVED, InputTypes.KNOWN]]
+        future_cols = [col for col, type_ in self.data_formatter.column_definition
+                      if type_ == InputTypes.KNOWN]
+        
+        # Initialize input arrays
+        batch_size = len(df)
+        static_inputs = np.zeros((batch_size, len(static_cols)))
+        historical_inputs = np.zeros((batch_size, self.num_encoder_steps, len(historical_cols)))
+        future_inputs = np.zeros((batch_size, self.num_steps, len(future_cols)))
+        
+        # Fill static inputs
+        for i, col in enumerate(static_cols):
+            if col in df.columns:
+                static_inputs[:, i] = df[col].values
+        
+        # Fill historical inputs (assume sequential time steps)
+        for i, col in enumerate(historical_cols):
+            if col in df.columns:
+                # For simplicity, repeat the same value across time steps
+                # In a real implementation, you'd have proper time series data
+                values = df[col].values
+                for t in range(self.num_encoder_steps):
+                    historical_inputs[:, t, i] = values
+        
+        # Fill future inputs
+        for i, col in enumerate(future_cols):
+            if col in df.columns:
+                # For simplicity, repeat the same value across time steps
+                values = df[col].values
+                for t in range(self.num_steps):
+                    future_inputs[:, t, i] = values
+        
+        # Final validation of prepared inputs
+        if np.isnan(static_inputs).any():
+            logger.error("Static inputs contain NaN values!")
+        if np.isnan(historical_inputs).any():
+            logger.error("Historical inputs contain NaN values!")
+        if np.isnan(future_inputs).any():
+            logger.error("Future inputs contain NaN values!")
+            
+        return static_inputs, historical_inputs, future_inputs
+    
+    def fit(self, train_df: pd.DataFrame, valid_df: pd.DataFrame, callbacks=None) -> Dict:
+        """Enhanced fit method with proper normalization handling."""
+        
+        # Normalize once and reuse
+        logger.info("Performing one-time data normalization...")
+        train_normalized = self._validate_and_normalize_data(train_df.copy())
+        valid_normalized = self._validate_and_normalize_data(valid_df.copy())
+        
+        # Prepare inputs from normalized data (fix the method call)
+        train_static, train_hist, train_future = self._prepare_inputs_from_normalized(train_normalized)
+        valid_static, valid_hist, valid_future = self._prepare_inputs_from_normalized(valid_normalized)
+        
+        # Extract targets from normalized data
+        train_targets = train_normalized['close'].values.reshape(-1, 1)
+        valid_targets = valid_normalized['close'].values.reshape(-1, 1)
+        
+        # Set up default callbacks if none provided
+        if callbacks is None:
+            callbacks = [
+                tf.keras.callbacks.EarlyStopping(
+                    monitor='val_loss',
+                    patience=self.early_stopping_patience,
+                    restore_best_weights=True
+                )
+            ]
+        
+        # Train with callbacks
+        history = self.model.fit(
+            [train_static, train_hist, train_future],
+            train_targets,
+            validation_data=([valid_static, valid_hist, valid_future], valid_targets),
+            epochs=self.num_epochs,
+            batch_size=self.minibatch_size,
+            callbacks=callbacks,
+            verbose=1
+        )
+        
+        return {
+            'history': [{'epoch': i+1, 
+                        'train_loss': history.history['loss'][i],
+                        'train_mae': history.history['mae'][i],
+                        'val_loss': history.history['val_loss'][i], 
+                        'val_mae': history.history['val_mae'][i]}
+                       for i in range(len(history.history['loss']))],
+            'best_epoch': len(history.history['loss']),
+            'best_val_loss': min(history.history['val_loss'])
+        }
+    
+    def _prepare_inputs_from_normalized(self, df_normalized: pd.DataFrame) -> tuple:
+        """Prepare inputs from already normalized DataFrame."""
+        logger.info("Preparing inputs from normalized data...")
+        
+        # Get column information from data formatter
+        static_cols = [col for col, type_ in self.data_formatter.column_definition 
+                      if type_ == InputTypes.STATIC]
+        historical_cols = [col for col, type_ in self.data_formatter.column_definition
+                          if type_ in [InputTypes.TARGET, InputTypes.OBSERVED, InputTypes.KNOWN]]
+        future_cols = [col for col, type_ in self.data_formatter.column_definition
+                      if type_ == InputTypes.KNOWN]
+        
+        # Initialize input arrays
+        batch_size = len(df_normalized)
+        static_inputs = np.zeros((batch_size, len(static_cols)))
+        historical_inputs = np.zeros((batch_size, self.num_encoder_steps, len(historical_cols)))
+        future_inputs = np.zeros((batch_size, self.num_steps, len(future_cols)))
+        
+        # Fill static inputs
+        for i, col in enumerate(static_cols):
+            if col in df_normalized.columns:
+                static_inputs[:, i] = df_normalized[col].values
+        
+        # Fill historical inputs
+        for i, col in enumerate(historical_cols):
+            if col in df_normalized.columns:
+                values = df_normalized[col].values
+                for t in range(self.num_encoder_steps):
+                    historical_inputs[:, t, i] = values
+        
+        # Fill future inputs
+        for i, col in enumerate(future_cols):
+            if col in df_normalized.columns:
+                values = df_normalized[col].values
+                for t in range(self.num_steps):
+                    future_inputs[:, t, i] = values
+        
+        # Final validation of prepared inputs
+        if np.isnan(static_inputs).any():
+            logger.error("Static inputs contain NaN values!")
+        if np.isnan(historical_inputs).any():
+            logger.error("Historical inputs contain NaN values!")
+        if np.isnan(future_inputs).any():
+            logger.error("Future inputs contain NaN values!")
+            
+        return static_inputs, historical_inputs, future_inputs
+    
+    def evaluate(self, test_df: pd.DataFrame) -> Dict:
+        """Evaluate the model.
+        
+        Args:
+            test_df: Test data
+            
+        Returns:
+            Dictionary of evaluation metrics
+        """
+        # Prepare test data
+        test_static, test_hist, test_future = self._prepare_inputs(test_df)
+        
+        # Get normalized targets
+        test_normalized = self._validate_and_normalize_data(test_df.copy())
+        test_targets = test_normalized['close'].values.reshape(-1, 1)
+        
+        # Evaluate
+        test_loss = self.model.evaluate(
+            [test_static, test_hist, test_future],
+            test_targets,
+            verbose=0
+        )
+        
+        # Calculate additional metrics
+        predictions = self.predict(test_df)
+        mape = np.mean(np.abs((test_targets - predictions) / (test_targets + 1e-6))) * 100
+        rmse = np.sqrt(np.mean((test_targets - predictions) ** 2))
+        
+        return {
+            'test_loss': test_loss[0],
+            'test_mae': test_loss[1],
+            'test_mape': mape,
+            'test_rmse': rmse
+        }
+    
+    def predict(self, df: pd.DataFrame) -> np.ndarray:
+        """Generate predictions.
+        
+        Args:
+            df: Input data
+            
+        Returns:
+            Array of predictions
+        """
+        # Prepare inputs
+        static_inputs, historical_inputs, future_inputs = self._prepare_inputs(df)
+        
+        # Generate predictions
+        predictions = self.model.predict(
+            [static_inputs, historical_inputs, future_inputs],
+            verbose=0
+        )
+        
+        # Reshape predictions
+        predictions = predictions.reshape(-1)
+        
+        return predictions
+    
+    def save(self, path: str):
+        """Save model to disk.
+        
+        Args:
+            path: Path to save model
+        """
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        
+        # Save model weights - Keras now requires .weights.h5 suffix
+        self.model.save_weights(f"{path}.weights.h5")
+        
+        # Save model config and training state
+        config = {
+            'model_config': self.config,
+            'best_val_loss': self.best_val_loss,
+            'best_epoch': self.best_epoch,
+            'training_history': self.training_history
+        }
+        
+        with open(f"{path}_config.json", 'w') as f:
+            json.dump(config, f)
+            
+    def load(self, path: str):
+        """Load model from disk.
+        
+        Args:
+            path: Path to load model from
+        """
+        # Load model weights - updated for new Keras format
+        self.model.load_weights(f"{path}.weights.h5")
+        
+        # Load config and training state
+        with open(f"{path}_config.json", 'r') as f:
+            config = json.load(f)
+            
+        self.best_val_loss = config['best_val_loss']
+        self.best_epoch = config['best_epoch']
+        self.training_history = config['training_history']
+        
+    def get_attention_weights(self, inputs) -> np.ndarray:
+        """Get attention weights for interpretability.
+        
+        Args:
+            inputs: Either a DataFrame or tuple of (static, historical, future) inputs
+            
+        Returns:
+            Array of attention weights
+        """
+        # Create a model that outputs attention weights
+        attention_model = Model(
+            inputs=self.model.inputs,
+            outputs=self.model.get_layer('interpretable_multi_head_attention').output
+        )
+        
+        # Handle both DataFrame and tuple inputs
+        if isinstance(inputs, tuple):
+            # Already prepared inputs
+            static_inputs, historical_inputs, future_inputs = inputs
+        else:
+            # DataFrame input - need to prepare
+            static_inputs, historical_inputs, future_inputs = self._prepare_inputs(inputs)
+        
+        # Get attention weights
+        attention_weights = attention_model.predict(
+            [static_inputs, historical_inputs, future_inputs],
+            verbose=0
+        )
+        
+        return attention_weights 

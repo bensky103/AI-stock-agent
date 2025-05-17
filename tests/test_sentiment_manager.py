@@ -1,0 +1,256 @@
+"""Tests for the sentiment analysis manager."""
+
+import pytest
+from unittest.mock import Mock, patch
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
+import pytz
+from data_input.sentiment_manager import (
+    SentimentManager,
+    TwitterSource,
+    RedditSource,
+    SentimentError
+)
+
+# Test data
+MOCK_TWEETS = [
+    {
+        'created_at': datetime.now(pytz.UTC),
+        'full_text': 'Great earnings report from $AAPL!',
+        'retweet_count': 100,
+        'favorite_count': 500,
+        'user': Mock(followers_count=10000, verified=True)
+    },
+    {
+        'created_at': datetime.now(pytz.UTC) - timedelta(hours=1),
+        'full_text': 'Not impressed with $AAPL performance',
+        'retweet_count': 50,
+        'favorite_count': 200,
+        'user': Mock(followers_count=5000, verified=False)
+    }
+]
+
+MOCK_REDDIT_POSTS = [
+    {
+        'created_utc': datetime.now(pytz.UTC).timestamp(),
+        'title': 'AAPL Stock Analysis',
+        'selftext': 'Positive outlook for Apple stock',
+        'score': 100,
+        'num_comments': 50,
+        'comments': [
+            Mock(
+                body='Great analysis!',
+                score=20,
+                created_utc=datetime.now(pytz.UTC).timestamp()
+            ),
+            Mock(
+                body='I disagree',
+                score=5,
+                created_utc=datetime.now(pytz.UTC).timestamp()
+            )
+        ]
+    }
+]
+
+@pytest.fixture
+def mock_config():
+    """Create mock configuration."""
+    return {
+        'sentiment': {
+            'sources': {
+                'twitter': {
+                    'enabled': True,
+                    'max_tweets': 100,
+                    'min_retweets': 5,
+                    'languages': ['en']
+                },
+                'reddit': {
+                    'enabled': True,
+                    'subreddits': ['wallstreetbets', 'stocks'],
+                    'min_score': 10,
+                    'max_comments': 100
+                }
+            },
+            'aggregation': {
+                'window': '1d',
+                'min_sources': 1,
+                'weight_twitter': 0.6,
+                'weight_reddit': 0.4
+            }
+        },
+        'market_data': {
+            'symbols': ['AAPL', 'MSFT']
+        }
+    }
+
+@pytest.fixture
+def mock_twitter_api():
+    """Create mock Twitter API."""
+    with patch('tweepy.API') as mock_api:
+        mock_cursor = Mock()
+        mock_cursor.items.return_value = MOCK_TWEETS
+        mock_api.return_value.search_tweets.return_value = mock_cursor
+        yield mock_api
+
+@pytest.fixture
+def mock_reddit_client():
+    """Create mock Reddit client."""
+    with patch('praw.Reddit') as mock_reddit:
+        mock_subreddit = Mock()
+        mock_subreddit.search.return_value = MOCK_REDDIT_POSTS
+        mock_reddit.return_value.subreddit.return_value = mock_subreddit
+        yield mock_reddit
+
+def test_twitter_source_initialization(mock_config):
+    """Test Twitter source initialization."""
+    with patch('os.getenv') as mock_env:
+        mock_env.side_effect = ['key', 'secret', 'token', 'token_secret']
+        source = TwitterSource()
+        assert source.rate_limit == (450, 900)
+
+def test_reddit_source_initialization(mock_config):
+    """Test Reddit source initialization."""
+    with patch('os.getenv') as mock_env:
+        mock_env.side_effect = ['client_id', 'client_secret', 'user_agent']
+        source = RedditSource()
+        assert source.rate_limit == (60, 60)
+
+def test_sentiment_manager_initialization(mock_config):
+    """Test sentiment manager initialization."""
+    with patch('yaml.safe_load') as mock_yaml:
+        mock_yaml.return_value = mock_config
+        manager = SentimentManager()
+        assert manager.sources['twitter'] is not None
+        assert manager.sources['reddit'] is not None
+
+def test_twitter_data_fetching(mock_twitter_api, mock_config):
+    """Test Twitter data fetching."""
+    with patch('os.getenv') as mock_env:
+        mock_env.side_effect = ['key', 'secret', 'token', 'token_secret']
+        source = TwitterSource()
+        
+        end_date = datetime.now(pytz.UTC)
+        start_date = end_date - timedelta(days=1)
+        
+        df = source.fetch_data(
+            symbol='AAPL',
+            start_date=start_date,
+            end_date=end_date
+        )
+        
+        assert not df.empty
+        assert 'sentiment_score' in df.columns
+        assert 'engagement_score' in df.columns
+        assert len(df) == len(MOCK_TWEETS)
+
+def test_reddit_data_fetching(mock_reddit_client, mock_config):
+    """Test Reddit data fetching."""
+    with patch('os.getenv') as mock_env:
+        mock_env.side_effect = ['client_id', 'client_secret', 'user_agent']
+        source = RedditSource()
+        
+        end_date = datetime.now(pytz.UTC)
+        start_date = end_date - timedelta(days=1)
+        
+        df = source.fetch_data(
+            symbol='AAPL',
+            start_date=start_date,
+            end_date=end_date,
+            subreddits=['wallstreetbets']
+        )
+        
+        assert not df.empty
+        assert 'sentiment_score' in df.columns
+        assert 'engagement_score' in df.columns
+        assert len(df) == len(MOCK_REDDIT_POSTS)
+
+def test_sentiment_aggregation(mock_config):
+    """Test sentiment score aggregation."""
+    with patch('yaml.safe_load') as mock_yaml:
+        mock_yaml.return_value = mock_config
+        manager = SentimentManager()
+        
+        # Create test data
+        data = pd.DataFrame({
+            'symbol': ['AAPL', 'AAPL', 'MSFT', 'MSFT'],
+            'datetime': [
+                datetime.now(pytz.UTC),
+                datetime.now(pytz.UTC) - timedelta(hours=12),
+                datetime.now(pytz.UTC),
+                datetime.now(pytz.UTC) - timedelta(hours=12)
+            ],
+            'sentiment_score': [0.5, -0.3, 0.2, 0.4],
+            'engagement_score': [100, 50, 80, 60]
+        })
+        
+        result = manager._aggregate_sentiment(data)
+        
+        assert not result.empty
+        assert 'sentiment_score' in result.columns
+        assert 'engagement_score' in result.columns
+        assert len(result) <= len(data)  # Due to resampling
+
+def test_sentiment_manager_integration(mock_twitter_api, mock_reddit_client, mock_config):
+    """Test full sentiment manager integration."""
+    with patch('yaml.safe_load') as mock_yaml, \
+         patch('os.getenv') as mock_env:
+        mock_yaml.return_value = mock_config
+        mock_env.side_effect = [
+            'key', 'secret', 'token', 'token_secret',  # Twitter
+            'client_id', 'client_secret', 'user_agent'  # Reddit
+        ]
+        
+        manager = SentimentManager()
+        
+        end_date = datetime.now(pytz.UTC)
+        start_date = end_date - timedelta(days=1)
+        
+        df = manager.get_sentiment_data(
+            symbols=['AAPL'],
+            start_date=start_date,
+            end_date=end_date
+        )
+        
+        assert not df.empty
+        assert isinstance(df.index, pd.MultiIndex)
+        assert 'sentiment_score' in df.columns
+        assert 'engagement_score' in df.columns
+
+def test_error_handling(mock_config):
+    """Test error handling."""
+    with patch('yaml.safe_load') as mock_yaml:
+        mock_yaml.return_value = mock_config
+        
+        # Test with invalid date range
+        manager = SentimentManager()
+        with pytest.raises(ValueError):
+            manager.get_sentiment_data(
+                start_date='2024-01-01',
+                end_date='2023-12-31'
+            )
+        
+        # Test with invalid symbols
+        with pytest.raises(SentimentError):
+            manager.get_sentiment_data(symbols=[])
+
+def test_rate_limiting(mock_config):
+    """Test rate limiting functionality."""
+    with patch('yaml.safe_load') as mock_yaml:
+        mock_yaml.return_value = mock_config
+        manager = SentimentManager()
+        
+        # Test Twitter rate limiter
+        assert manager._check_rate_limit('twitter')
+        for _ in range(450):  # Max requests
+            manager._update_rate_limit('twitter')
+        assert not manager._check_rate_limit('twitter')
+        
+        # Test Reddit rate limiter
+        assert manager._check_rate_limit('reddit')
+        for _ in range(60):  # Max requests
+            manager._update_rate_limit('reddit')
+        assert not manager._check_rate_limit('reddit')
+
+if __name__ == '__main__':
+    pytest.main(['-v', __file__]) 

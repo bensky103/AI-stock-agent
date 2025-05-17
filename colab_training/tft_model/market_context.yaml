@@ -1,0 +1,45 @@
+average_indicators:
+  bb_width: !!python/object/apply:numpy._core.multiarray.scalar
+  - &id001 !!python/object/apply:numpy.dtype
+    args:
+    - f8
+    - false
+    - true
+    state: !!python/tuple
+    - 3
+    - <
+    - null
+    - null
+    - null
+    - -1
+    - -1
+    - 0
+  - !!binary |
+    VZAEsQn7zD8=
+  rsi: !!python/object/apply:numpy._core.multiarray.scalar
+  - *id001
+  - !!binary |
+    WMmHGoOYT0A=
+  volatility: !!python/object/apply:numpy._core.multiarray.scalar
+  - *id001
+  - !!binary |
+    QNcmbbWpoD8=
+  volume_ratio: !!python/object/apply:numpy._core.multiarray.scalar
+  - *id001
+  - !!binary |
+    yaJWl11a6z8=
+regime_distribution:
+  2: 1.0
+signal_distribution:
+  bearish: !!python/object/apply:numpy._core.multiarray.scalar
+  - *id001
+  - !!binary |
+    AAAAAAAA4D8=
+  bullish: !!python/object/apply:numpy._core.multiarray.scalar
+  - *id001
+  - !!binary |
+    AAAAAAAAwD8=
+  neutral: !!python/object/apply:numpy._core.multiarray.scalar
+  - *id001
+  - !!binary |
+    AAAAAAAA2D8=

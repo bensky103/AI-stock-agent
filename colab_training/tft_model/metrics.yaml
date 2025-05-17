@@ -1,0 +1,23 @@
+test_loss: 1.5536619424819946
+test_mae: 0.7486657500267029
+test_mape: !!python/object/apply:numpy._core.multiarray.scalar
+- &id001 !!python/object/apply:numpy.dtype
+  args:
+  - f8
+  - false
+  - true
+  state: !!python/tuple
+  - 3
+  - <
+  - null
+  - null
+  - null
+  - -1
+  - -1
+  - 0
+- !!binary |
+  gHGn2JvVVEA=
+test_rmse: !!python/object/apply:numpy._core.multiarray.scalar
+- *id001
+- !!binary |
+  exJwRHRI9z8=
