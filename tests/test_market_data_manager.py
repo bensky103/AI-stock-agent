@@ -1,5 +1,5 @@
 """Tests for the market data manager."""
-
+"test"
 import pytest
 from unittest.mock import Mock, patch
 import pandas as pd
