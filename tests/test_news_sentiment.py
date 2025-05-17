@@ -8,16 +8,12 @@ from data_input.news_sentiment import (
     _preprocess_text,
     _calculate_credibility_score,
     _get_cached_sentiment,
-<<<<<<< HEAD
     NewsSentimentError,
     _get_twitter_client,
     _get_reddit_client,
     _fetch_twitter_news,
     _fetch_reddit_news,
     get_aggregate_sentiment
-=======
-    NewsSentimentError
->>>>>>> e719f64 (news_sentiment, support for REDDIT+TWITTER news + tests)
 )
 
 # Test data
@@ -30,11 +26,7 @@ def mock_yfinance_news():
         {
             'title': 'Tesla Q4 Earnings Beat Expectations',
             'link': 'https://example.com/tesla-earnings',
-<<<<<<< HEAD
-            'providerPublishTime': int(datetime(2024, 1, 15, tzinfo=pytz.UTC).timestamp())  # Fixed timestamp
-=======
-            'providerPublishTime': int(datetime.now(pytz.UTC).timestamp())
->>>>>>> e719f64 (news_sentiment, support for REDDIT+TWITTER news + tests)
+            'providerPublishTime': int(datetime(2024, 1, 15, tzinfo=pytz.UTC).timestamp())
         }
     ]
 
@@ -43,15 +35,10 @@ def mock_twitter_data():
     return [
         {
             'text': 'Tesla stock looking bullish!',
-<<<<<<< HEAD
-            'datetime': datetime(2024, 1, 15, tzinfo=pytz.UTC),  # Fixed datetime
+            'datetime': datetime(2024, 1, 15, tzinfo=pytz.UTC),
             'source': 'twitter',
             'title': 'Tesla stock looking bullish!',
             'metrics': {
-=======
-            'created_at': datetime.now(pytz.UTC),
-            'public_metrics': {
->>>>>>> e719f64 (news_sentiment, support for REDDIT+TWITTER news + tests)
                 'followers_count': 5000,
                 'retweet_count': 100,
                 'like_count': 500
@@ -64,14 +51,9 @@ def mock_reddit_data():
     return [
         {
             'title': 'Tesla Stock Analysis',
-<<<<<<< HEAD
             'text': 'Great potential for growth',
-            'datetime': datetime(2024, 1, 15, tzinfo=pytz.UTC),  # Fixed datetime
+            'datetime': datetime(2024, 1, 15, tzinfo=pytz.UTC),
             'source': 'reddit_stocks',
-=======
-            'selftext': 'Great potential for growth',
-            'created_utc': datetime.now(pytz.UTC).timestamp(),
->>>>>>> e719f64 (news_sentiment, support for REDDIT+TWITTER news + tests)
             'score': 100,
             'num_comments': 50
         }
@@ -138,7 +120,6 @@ def test_cached_sentiment():
 def test_get_news_sentiment_yfinance(mock_ticker, mock_yfinance_news):
     """Test news sentiment analysis with yfinance data."""
     # Setup mock
-<<<<<<< HEAD
     mock_ticker_instance = MagicMock()
     mock_ticker_instance.news = mock_yfinance_news
     mock_ticker.return_value = mock_ticker_instance
@@ -146,20 +127,12 @@ def test_get_news_sentiment_yfinance(mock_ticker, mock_yfinance_news):
     # Test basic functionality
     df = get_news_sentiment(
         symbols=["TSLA"],
-=======
-    mock_ticker.return_value.news = mock_yfinance_news
-    
-    # Test basic functionality
-    df = get_news_sentiment(
-        symbols="TSLA",
->>>>>>> e719f64 (news_sentiment, support for REDDIT+TWITTER news + tests)
         start_date="2024-01-01",
         end_date="2024-01-31",
         sources=['news']
     )
     
     assert isinstance(df, pd.DataFrame)
-<<<<<<< HEAD
     assert not df.empty, "DataFrame should not be empty"
     assert len(df) == len(mock_yfinance_news), f"Expected {len(mock_yfinance_news)} rows, got {len(df)}"
     assert 'sentiment_score' in df.columns
@@ -176,29 +149,12 @@ def test_get_news_sentiment_twitter(mock_fetch_twitter, mock_twitter_data):
     # Test basic functionality
     df = get_news_sentiment(
         symbols=["TSLA"],
-=======
-    assert not df.empty
-    assert 'sentiment_score' in df.columns
-    assert 'credibility_score' in df.columns
-    assert 'weighted_sentiment' in df.columns
-
-@patch('tweepy.Client')
-def test_get_news_sentiment_twitter(mock_twitter_client, mock_twitter_data):
-    """Test news sentiment analysis with Twitter data."""
-    # Setup mock
-    mock_twitter_client.return_value.search_recent_tweets.return_value.data = mock_twitter_data
-    
-    # Test basic functionality
-    df = get_news_sentiment(
-        symbols="TSLA",
->>>>>>> e719f64 (news_sentiment, support for REDDIT+TWITTER news + tests)
         start_date="2024-01-01",
         end_date="2024-01-31",
         sources=['twitter']
     )
     
     assert isinstance(df, pd.DataFrame)
-<<<<<<< HEAD
     assert not df.empty, "DataFrame should not be empty"
     assert len(df) == len(mock_twitter_data), f"Expected {len(mock_twitter_data)} rows, got {len(df)}"
     assert 'sentiment_score' in df.columns
@@ -215,62 +171,30 @@ def test_get_news_sentiment_reddit(mock_fetch_reddit, mock_reddit_data):
     # Test basic functionality
     df = get_news_sentiment(
         symbols=["TSLA"],
-=======
-    assert not df.empty
-    assert 'sentiment_score' in df.columns
-    assert 'credibility_score' in df.columns
-    assert 'weighted_sentiment' in df.columns
-
-@patch('praw.Reddit')
-def test_get_news_sentiment_reddit(mock_reddit_client, mock_reddit_data):
-    """Test news sentiment analysis with Reddit data."""
-    # Setup mock
-    mock_subreddit = MagicMock()
-    mock_subreddit.search.return_value = mock_reddit_data
-    mock_reddit_client.return_value.subreddit.return_value = mock_subreddit
-    
-    # Test basic functionality
-    df = get_news_sentiment(
-        symbols="TSLA",
->>>>>>> e719f64 (news_sentiment, support for REDDIT+TWITTER news + tests)
         start_date="2024-01-01",
         end_date="2024-01-31",
         sources=['reddit']
     )
     
     assert isinstance(df, pd.DataFrame)
-<<<<<<< HEAD
     assert not df.empty, "DataFrame should not be empty"
     assert len(df) == len(mock_reddit_data), f"Expected {len(mock_reddit_data)} rows, got {len(df)}"
     assert 'sentiment_score' in df.columns
     assert 'credibility_score' in df.columns
     assert 'weighted_sentiment' in df.columns
     assert df['source'].iloc[0] == 'reddit_stocks'
-=======
-    assert not df.empty
-    assert 'sentiment_score' in df.columns
-    assert 'credibility_score' in df.columns
-    assert 'weighted_sentiment' in df.columns
->>>>>>> e719f64 (news_sentiment, support for REDDIT+TWITTER news + tests)
 
 def test_get_news_sentiment_error_handling():
     """Test error handling in news sentiment analysis."""
     # Test with invalid date range
-<<<<<<< HEAD
     with pytest.raises(ValueError, match="end_date must be after start_date"):
         get_news_sentiment(
             symbols=["TSLA"],
-=======
-    with pytest.raises(NewsSentimentError):
-        get_news_sentiment(
-            symbols="TSLA",
->>>>>>> e719f64 (news_sentiment, support for REDDIT+TWITTER news + tests)
             start_date="2024-01-31",
             end_date="2024-01-01"  # Invalid date range
         )
     
     # Test with empty symbols list
-<<<<<<< HEAD
     with pytest.raises(NewsSentimentError, match="No symbols specified"):
         get_news_sentiment(symbols=[])
     
@@ -423,65 +347,4 @@ def test_get_news_sentiment_invalid_sources():
         )
 
 if __name__ == "__main__":
-    pytest.main([__file__, "-v"]) 
-=======
-    with pytest.raises(NewsSentimentError):
-        get_news_sentiment(symbols=[])
-
-def test_get_news_sentiment_combined():
-    """Test news sentiment analysis with multiple sources."""
-    with patch('yfinance.Ticker') as mock_ticker, \
-         patch('tweepy.Client') as mock_twitter, \
-         patch('praw.Reddit') as mock_reddit:
-        
-        # Setup mocks
-        mock_ticker.return_value.news = mock_yfinance_news
-        mock_twitter.return_value.search_recent_tweets.return_value.data = mock_twitter_data
-        mock_subreddit = MagicMock()
-        mock_subreddit.search.return_value = mock_reddit_data
-        mock_reddit.return_value.subreddit.return_value = mock_subreddit
-        
-        # Test combined functionality
-        df = get_news_sentiment(
-            symbols="TSLA",
-            start_date="2024-01-01",
-            end_date="2024-01-31",
-            sources=['news', 'twitter', 'reddit']
-        )
-        
-        assert isinstance(df, pd.DataFrame)
-        assert not df.empty
-        assert len(df['source'].unique()) == 3  # Should have data from all sources
-        assert 'sentiment_score' in df.columns
-        assert 'credibility_score' in df.columns
-        assert 'weighted_sentiment' in df.columns
-        assert 'sentiment_category' in df.columns
-
-def test_get_news_sentiment_caching():
-    """Test sentiment caching functionality."""
-    with patch('yfinance.Ticker') as mock_ticker:
-        mock_ticker.return_value.news = mock_yfinance_news
-        
-        # Test with caching enabled
-        df1 = get_news_sentiment(
-            symbols="TSLA",
-            start_date="2024-01-01",
-            end_date="2024-01-31",
-            sources=['news'],
-            use_cache=True
-        )
-        
-        # Test with caching disabled
-        df2 = get_news_sentiment(
-            symbols="TSLA",
-            start_date="2024-01-01",
-            end_date="2024-01-31",
-            sources=['news'],
-            use_cache=False
-        )
-        
-        assert isinstance(df1, pd.DataFrame)
-        assert isinstance(df2, pd.DataFrame)
-        assert not df1.empty
-        assert not df2.empty 
->>>>>>> e719f64 (news_sentiment, support for REDDIT+TWITTER news + tests)
+    pytest.main([__file__, "-v"])
