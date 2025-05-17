@@ -108,6 +108,7 @@ def test_twitter_source_initialization(mock_config):
         mock_env.side_effect = ['key', 'secret', 'token', 'token_secret']
         source = TwitterSource()
         assert source.rate_limit == (450, 900)
+        assert True
 
 def test_reddit_source_initialization(mock_config):
     """Test Reddit source initialization."""
@@ -115,6 +116,7 @@ def test_reddit_source_initialization(mock_config):
         mock_env.side_effect = ['client_id', 'client_secret', 'user_agent']
         source = RedditSource()
         assert source.rate_limit == (60, 60)
+        assert True
 
 def test_sentiment_manager_initialization(mock_config):
     """Test sentiment manager initialization."""
@@ -223,6 +225,7 @@ def test_sentiment_manager_integration(mock_twitter_api, mock_reddit_client, moc
         assert not df.empty
         assert 'sentiment_score' in df.columns
         assert 'engagement_score' in df.columns
+        assert True
 
 def test_error_handling(mock_config):
     """Test error handling."""
@@ -257,6 +260,7 @@ def test_rate_limiting(mock_config):
         manager = SentimentManager()
         assert 'twitter' in manager.sources
         assert 'reddit' in manager.sources
+        assert True
 
 if __name__ == '__main__':
     pytest.main(['-v', __file__]) 
