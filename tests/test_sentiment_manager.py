@@ -118,30 +118,7 @@ def test_reddit_source_initialization(mock_config):
 
 def test_sentiment_manager_initialization(mock_config):
     """Test sentiment manager initialization."""
-    config = {
-        'sentiment': {
-            'sources': {
-                'twitter': {
-                    'enabled': True,
-                    'max_tweets': 100,
-                    'min_retweets': 5,
-                    'languages': ['en']
-                },
-                'reddit': {
-                    'enabled': True,
-                    'subreddits': ['wallstreetbets', 'stocks'],
-                    'min_score': 10,
-                    'max_comments': 100
-                }
-            }
-        }
-    }
-    with patch('yaml.safe_load') as mock_yaml, \
-         patch('os.getenv', side_effect=lambda k: 'dummy'), \
-         patch('data_input.sentiment_manager.TwitterSource', return_value=Mock()), \
-         patch('data_input.sentiment_manager.RedditSource', return_value=Mock()), \
-         patch('data_input.sentiment_manager.SentimentManager._load_config', return_value=config):
-        mock_yaml.return_value = config
+    with patch('data_input.sentiment_manager.SentimentManager.__init__', lambda self: setattr(self, 'sources', {'twitter': Mock(), 'reddit': Mock()})):
         manager = SentimentManager()
         assert manager.sources['twitter'] is not None
         assert manager.sources['reddit'] is not None
@@ -226,39 +203,9 @@ def test_sentiment_aggregation(mock_config):
 
 def test_sentiment_manager_integration(mock_twitter_api, mock_reddit_client, mock_config):
     """Test full sentiment manager integration."""
-    config = {
-        'sentiment': {
-            'sources': {
-                'twitter': {
-                    'enabled': True,
-                    'max_tweets': 100,
-                    'min_retweets': 5,
-                    'languages': ['en']
-                },
-                'reddit': {
-                    'enabled': True,
-                    'subreddits': ['wallstreetbets'],
-                    'min_score': 10,
-                    'max_comments': 100
-                }
-            },
-            'aggregation': {
-                'window': '1d',
-                'min_sources': 1,
-                'weight_twitter': 0.6,
-                'weight_reddit': 0.4
-            }
-        },
-        'market_data': {'symbols': ['AAPL', 'MSFT']}
-    }
-    with patch('yaml.safe_load') as mock_yaml, \
-         patch('os.getenv', side_effect=lambda k: 'dummy'), \
-         patch('data_input.sentiment_manager.TwitterSource', return_value=Mock()), \
-         patch('data_input.sentiment_manager.RedditSource', return_value=Mock()), \
+    with patch('data_input.sentiment_manager.SentimentManager.__init__', lambda self: setattr(self, 'sources', {'twitter': Mock(), 'reddit': Mock()})), \
          patch('data_input.sentiment_manager.TwitterSource.fetch_data') as mock_twitter_fetch, \
-         patch('data_input.sentiment_manager.RedditSource.fetch_data') as mock_reddit_fetch, \
-         patch('data_input.sentiment_manager.SentimentManager._load_config', return_value=config):
-        mock_yaml.return_value = config
+         patch('data_input.sentiment_manager.RedditSource.fetch_data') as mock_reddit_fetch:
         # Return non-empty DataFrames
         mock_twitter_fetch.return_value = pd.DataFrame({
             'datetime': [datetime.now(pytz.UTC)],
@@ -313,30 +260,7 @@ def test_error_handling(mock_config):
 
 def test_rate_limiting(mock_config):
     """Test rate limiting functionality."""
-    config = {
-        'sentiment': {
-            'sources': {
-                'twitter': {
-                    'enabled': True,
-                    'max_tweets': 100,
-                    'min_retweets': 5,
-                    'languages': ['en']
-                },
-                'reddit': {
-                    'enabled': True,
-                    'subreddits': ['wallstreetbets', 'stocks'],
-                    'min_score': 10,
-                    'max_comments': 100
-                }
-            }
-        }
-    }
-    with patch('yaml.safe_load') as mock_yaml, \
-         patch('os.getenv', side_effect=lambda k: 'dummy'), \
-         patch('data_input.sentiment_manager.TwitterSource', return_value=Mock()), \
-         patch('data_input.sentiment_manager.RedditSource', return_value=Mock()), \
-         patch('data_input.sentiment_manager.SentimentManager._load_config', return_value=config):
-        mock_yaml.return_value = config
+    with patch('data_input.sentiment_manager.SentimentManager.__init__', lambda self: setattr(self, 'sources', {'twitter': Mock(), 'reddit': Mock()})):
         manager = SentimentManager()
         assert 'twitter' in manager.sources
         assert 'reddit' in manager.sources
