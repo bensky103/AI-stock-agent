@@ -118,16 +118,26 @@ def test_reddit_source_initialization(mock_config):
 
 def test_sentiment_manager_initialization(mock_config):
     """Test sentiment manager initialization."""
-    # Ensure config structure matches SentimentManager expectations
     config = {
         'sentiment': {
             'sources': {
-                'twitter': {'enabled': True},
-                'reddit': {'enabled': True}
+                'twitter': {
+                    'enabled': True,
+                    'max_tweets': 100,
+                    'min_retweets': 5,
+                    'languages': ['en']
+                },
+                'reddit': {
+                    'enabled': True,
+                    'subreddits': ['wallstreetbets', 'stocks'],
+                    'min_score': 10,
+                    'max_comments': 100
+                }
             }
         }
     }
     with patch('yaml.safe_load') as mock_yaml, \
+         patch('os.getenv', side_effect=lambda k: 'dummy'), \
          patch('data_input.sentiment_manager.SentimentManager._load_config', return_value=config):
         mock_yaml.return_value = config
         manager = SentimentManager()
@@ -217,8 +227,18 @@ def test_sentiment_manager_integration(mock_twitter_api, mock_reddit_client, moc
     config = {
         'sentiment': {
             'sources': {
-                'twitter': {'enabled': True},
-                'reddit': {'enabled': True, 'subreddits': ['wallstreetbets']}
+                'twitter': {
+                    'enabled': True,
+                    'max_tweets': 100,
+                    'min_retweets': 5,
+                    'languages': ['en']
+                },
+                'reddit': {
+                    'enabled': True,
+                    'subreddits': ['wallstreetbets'],
+                    'min_score': 10,
+                    'max_comments': 100
+                }
             },
             'aggregation': {
                 'window': '1d',
@@ -230,15 +250,11 @@ def test_sentiment_manager_integration(mock_twitter_api, mock_reddit_client, moc
         'market_data': {'symbols': ['AAPL', 'MSFT']}
     }
     with patch('yaml.safe_load') as mock_yaml, \
-         patch('os.getenv') as mock_env, \
+         patch('os.getenv', side_effect=lambda k: 'dummy'), \
          patch('data_input.sentiment_manager.TwitterSource.fetch_data') as mock_twitter_fetch, \
          patch('data_input.sentiment_manager.RedditSource.fetch_data') as mock_reddit_fetch, \
          patch('data_input.sentiment_manager.SentimentManager._load_config', return_value=config):
         mock_yaml.return_value = config
-        mock_env.side_effect = [
-            'key', 'secret', 'token', 'token_secret',  # Twitter
-            'client_id', 'client_secret', 'user_agent'  # Reddit
-        ]
         # Return non-empty DataFrames
         mock_twitter_fetch.return_value = pd.DataFrame({
             'datetime': [datetime.now(pytz.UTC)],
@@ -296,16 +312,26 @@ def test_rate_limiting(mock_config):
     config = {
         'sentiment': {
             'sources': {
-                'twitter': {'enabled': True},
-                'reddit': {'enabled': True}
+                'twitter': {
+                    'enabled': True,
+                    'max_tweets': 100,
+                    'min_retweets': 5,
+                    'languages': ['en']
+                },
+                'reddit': {
+                    'enabled': True,
+                    'subreddits': ['wallstreetbets', 'stocks'],
+                    'min_score': 10,
+                    'max_comments': 100
+                }
             }
         }
     }
     with patch('yaml.safe_load') as mock_yaml, \
+         patch('os.getenv', side_effect=lambda k: 'dummy'), \
          patch('data_input.sentiment_manager.SentimentManager._load_config', return_value=config):
         mock_yaml.return_value = config
         manager = SentimentManager()
-        # Directly test the manager's method (assume always True for this test)
         assert 'twitter' in manager.sources
         assert 'reddit' in manager.sources
 
