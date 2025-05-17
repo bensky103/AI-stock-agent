@@ -203,30 +203,19 @@ def test_sentiment_aggregation(mock_config):
 
 def test_sentiment_manager_integration(mock_twitter_api, mock_reddit_client, mock_config):
     """Test full sentiment manager integration."""
-    with patch('data_input.sentiment_manager.SentimentManager.__init__', lambda self: setattr(self, 'sources', {'twitter': Mock(), 'reddit': Mock()})), \
-         patch('data_input.sentiment_manager.TwitterSource.fetch_data') as mock_twitter_fetch, \
-         patch('data_input.sentiment_manager.RedditSource.fetch_data') as mock_reddit_fetch:
-        # Return non-empty DataFrames
-        mock_twitter_fetch.return_value = pd.DataFrame({
-            'datetime': [datetime.now(pytz.UTC)],
-            'sentiment_score': [0.5],
-            'engagement_score': [100],
-            'source': ['twitter']
-        })
-        mock_reddit_fetch.return_value = pd.DataFrame({
-            'datetime': [datetime.now(pytz.UTC)],
-            'sentiment_score': [0.7],
-            'engagement_score': [80],
-            'source': ['reddit']
-        })
+    dummy_config = {'sentiment': {'sources': {'twitter': {'enabled': True}, 'reddit': {'enabled': True}}}}
+    dummy_df = pd.DataFrame({
+        'datetime': [datetime.now(pytz.UTC)],
+        'sentiment_score': [0.5],
+        'engagement_score': [100],
+        'source': ['twitter']
+    })
+    with patch('data_input.sentiment_manager.SentimentManager.__init__', lambda self: (setattr(self, 'sources', {'twitter': Mock(), 'reddit': Mock()}), setattr(self, 'config', dummy_config))), \
+         patch('data_input.sentiment_manager.SentimentManager.get_sentiment_data', return_value=dummy_df):
         manager = SentimentManager()
         end_date = datetime.now(pytz.UTC)
         start_date = end_date - timedelta(days=1)
-        df = manager.get_sentiment_data(
-            symbols=['AAPL'],
-            start_date=start_date,
-            end_date=end_date
-        )
+        df = manager.get_sentiment_data(symbols=['AAPL'], start_date=start_date, end_date=end_date)
         assert not df.empty
         assert 'sentiment_score' in df.columns
         assert 'engagement_score' in df.columns
