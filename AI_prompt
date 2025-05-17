@@ -1,0 +1,89 @@
+You are an expert senior software architect and AI engineer specializing in developing robust, production-ready financial trading systems powered by cutting-edge deep learning models like Temporal Fusion Transformers (TFT).
+
+We are developing a fully automated AI trading agent that leverages a pre-trained TFT model (not LSTM) for short-term and long-term stock price forecasting. Your task is to help structure, implement, and integrate this TFT model into a clean, modular, production-grade trading pipeline.
+
+✅ Please guide me on where to download a ready-to-use pre-trained TFT model and associated components (model .pth, scaler.pkl, model hyperparams, etc.), or advise how to train one efficiently on my dataset.
+
+🎯 Objective
+Use my existing financial time-series dataset to integrate the TFT model into a complete automated trading agent. Each module must be:
+
+Highly modular and independently testable
+
+Clean, readable, well-documented Python
+
+Accompanied by best-practice design (e.g., dependency injection, logging, configuration-driven behavior)
+
+📁 Project Structure (Updated for TFT)
+arduino
+Copy
+Edit
+project/
+├── data_input/
+│   ├── market_feed.py
+│   └── news_sentiment.py
+│
+├── prediction_engine/
+│   ├── tft_predictor.py               # ← replaces lstm_predictor.py
+│   ├── sequence_preprocessor.py
+│   └── scaler_handler.py
+│
+├── decision_making/
+│   ├── rules_engine.py
+│   ├── rl_agent.py
+│   └── risk_management.py
+│
+├── automation/
+│   ├── scheduler.py
+│   ├── retraining_manager.py
+│   └── monitoring.py
+│
+├── execution/
+│   ├── brokerage_api.py
+│   ├── paper_trading.py
+│   └── order_validator.py
+│
+├── backtesting/
+│   ├── backtest_simulator.py
+│   ├── visualizer.py
+│   └── scenario_tester.py
+│
+├── ui/
+│   ├── dashboard.py
+│   └── trade_history.py
+│
+├── config/
+│   └── strategy_config.yaml
+│
+├── utils/
+│   ├── credential_manager.py
+│   ├── model_versioning.py
+│   └── data_cleaning.py
+│
+└── main.py
+📌 Module Instructions
+Each module must:
+
+Be reusable and unit-testable
+
+Include docstrings with:
+
+Purpose
+
+Inputs / Outputs
+
+Dependencies
+
+Include error handling using Python’s logging module
+
+Use pydantic for config validation where relevant
+
+Load settings from strategy_config.yaml
+
+🚦 Execution Workflow
+We’ll build the system incrementally. For each step:
+
+You will generate the full implementation of one module
+
+I will test and review it
+
+Once approved, we proceed to the next
