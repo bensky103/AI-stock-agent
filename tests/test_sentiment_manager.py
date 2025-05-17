@@ -210,7 +210,11 @@ def test_sentiment_manager_integration(mock_twitter_api, mock_reddit_client, moc
         'engagement_score': [100],
         'source': ['twitter']
     })
-    with patch('data_input.sentiment_manager.SentimentManager.__init__', lambda self: (setattr(self, 'sources', {'twitter': Mock(), 'reddit': Mock()}), setattr(self, 'config', dummy_config))), \
+    def fake_init(self):
+        self.sources = {'twitter': Mock(), 'reddit': Mock()}
+        self.config = dummy_config
+
+    with patch('data_input.sentiment_manager.SentimentManager.__init__', fake_init), \
          patch('data_input.sentiment_manager.SentimentManager.get_sentiment_data', return_value=dummy_df):
         manager = SentimentManager()
         end_date = datetime.now(pytz.UTC)
