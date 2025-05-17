@@ -138,6 +138,8 @@ def test_sentiment_manager_initialization(mock_config):
     }
     with patch('yaml.safe_load') as mock_yaml, \
          patch('os.getenv', side_effect=lambda k: 'dummy'), \
+         patch('data_input.sentiment_manager.TwitterSource', return_value=Mock()), \
+         patch('data_input.sentiment_manager.RedditSource', return_value=Mock()), \
          patch('data_input.sentiment_manager.SentimentManager._load_config', return_value=config):
         mock_yaml.return_value = config
         manager = SentimentManager()
@@ -251,6 +253,8 @@ def test_sentiment_manager_integration(mock_twitter_api, mock_reddit_client, moc
     }
     with patch('yaml.safe_load') as mock_yaml, \
          patch('os.getenv', side_effect=lambda k: 'dummy'), \
+         patch('data_input.sentiment_manager.TwitterSource', return_value=Mock()), \
+         patch('data_input.sentiment_manager.RedditSource', return_value=Mock()), \
          patch('data_input.sentiment_manager.TwitterSource.fetch_data') as mock_twitter_fetch, \
          patch('data_input.sentiment_manager.RedditSource.fetch_data') as mock_reddit_fetch, \
          patch('data_input.sentiment_manager.SentimentManager._load_config', return_value=config):
@@ -329,6 +333,8 @@ def test_rate_limiting(mock_config):
     }
     with patch('yaml.safe_load') as mock_yaml, \
          patch('os.getenv', side_effect=lambda k: 'dummy'), \
+         patch('data_input.sentiment_manager.TwitterSource', return_value=Mock()), \
+         patch('data_input.sentiment_manager.RedditSource', return_value=Mock()), \
          patch('data_input.sentiment_manager.SentimentManager._load_config', return_value=config):
         mock_yaml.return_value = config
         manager = SentimentManager()
