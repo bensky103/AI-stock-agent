@@ -640,6 +640,8 @@ def get_news_sentiment(
     valid_sources = ['news', 'twitter', 'reddit']
     if sources is None:
         sources = valid_sources
+    elif not sources:
+        raise ValueError("No sources specified")
     else:
         invalid_sources = [s for s in sources if s not in valid_sources]
         if invalid_sources:
