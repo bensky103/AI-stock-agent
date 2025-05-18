@@ -1,7 +1,7 @@
 import pytest
 import pandas as pd
 from datetime import datetime, timedelta
-from data_input.market_feed import market_data_manager
+from data_input.market_feed import MarketFeed
 from data_input.news_sentiment import NewsSentimentManager
 from prediction_engine.sequence_preprocessor import SequencePreprocessor
 from utils.data_cleaning import DataCleaner
@@ -10,7 +10,7 @@ class TestDataPipelineIntegration:
     @pytest.fixture
     def setup_pipeline(self, test_config):
         """Setup the complete data pipeline with all necessary components"""
-        market_manager = market_data_manager(config=test_config)
+        market_manager = MarketFeed(config=test_config)
         news_manager = NewsSentimentManager(config=test_config)
         preprocessor = SequencePreprocessor(config=test_config)
         cleaner = DataCleaner(config=test_config)

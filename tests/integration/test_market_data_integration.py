@@ -3,7 +3,7 @@
 import pytest
 import pandas as pd
 from datetime import datetime, timedelta
-from data_input.market_feed import market_data_manager
+from data_input.market_feed import MarketFeed
 from data_input.market_data_manager import MarketDataManager as EnhancedMarketManager
 from data_input.market_utils import MarketUtils
 
@@ -11,7 +11,7 @@ class TestMarketDataIntegration:
     @pytest.fixture
     def setup_market_components(self, test_config):
         """Setup market data components"""
-        market_manager = MarketDataManager(config=test_config)
+        market_manager = MarketFeed(config=test_config)
         enhanced_manager = EnhancedMarketManager(config=test_config)
         market_utils = MarketUtils(config=test_config)
         
