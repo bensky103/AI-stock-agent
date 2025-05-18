@@ -4,7 +4,7 @@ import pytest
 import pandas as pd
 from datetime import datetime, timedelta
 from data_input.market_feed import MarketFeed
-from data_input.news_sentiment import sentiment_manager
+from data_input.news_sentiment import SentimentManager
 from prediction_engine.sequence_preprocessor import SequencePreprocessor
 from utils.data_cleaning import DataCleaner
 
