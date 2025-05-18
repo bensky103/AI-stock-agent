@@ -1,8 +1,10 @@
+"""Integration tests for decision making module."""
+
 import pytest
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from decision_making.strategies.base_strategy import BaseStrategy
+from decision_making.strategies.base_strategy import TradingStrategy
 from decision_making.strategies.ml_hybrid_strategy import MLHybridStrategy
 from decision_making.strategies.position_manager import PositionManager
 
@@ -10,7 +12,7 @@ class TestDecisionMakingIntegration:
     @pytest.fixture
     def setup_decision_components(self, test_config):
         """Setup decision-making components"""
-        base_strategy = BaseStrategy(config=test_config)
+        base_strategy = TradingStrategy(config=test_config)
         ml_strategy = MLHybridStrategy(config=test_config)
         position_manager = PositionManager(config=test_config)
         

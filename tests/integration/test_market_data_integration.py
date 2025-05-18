@@ -1,7 +1,9 @@
+"""Integration tests for market data module."""
+
 import pytest
 import pandas as pd
 from datetime import datetime, timedelta
-from data_input.market_feed import MarketDataManager
+from data_input.market_feed import market_data_manager
 from data_input.market_data_manager import MarketDataManager as EnhancedMarketManager
 from data_input.market_utils import MarketUtils
 
