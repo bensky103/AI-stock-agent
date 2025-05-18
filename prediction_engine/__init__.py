@@ -17,15 +17,6 @@ def __getattr__(name):
     elif name == 'TFTScalerHandler':
         from .scaler_handler import TFTScalerHandler
         return TFTScalerHandler
-    elif name == 'LSTMScalerHandler':
-        from .scaler_handler import LSTMScalerHandler
-        return LSTMScalerHandler
-    elif name == 'EnhancedLSTM':
-        from .model import EnhancedLSTM
-        return EnhancedLSTM
-    elif name == 'create_model':
-        from .model import create_model
-        return create_model
     elif name == 'EnhancedStockPredictor':
         from .predictor import EnhancedStockPredictor
         return EnhancedStockPredictor
@@ -43,9 +34,6 @@ __all__ = [
     'TFTPredictor',
     'TFTPredictorError',
     'TFTScalerHandler',
-    'LSTMScalerHandler',
-    'EnhancedLSTM',
-    'create_model',
     'EnhancedStockPredictor',
     'FeatureEngineer',
     'SequencePreprocessor'

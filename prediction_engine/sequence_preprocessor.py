@@ -1,115 +1,223 @@
-# File: prediction_engine/sequence_preprocessor.py
+"""Sequence preprocessor module for stock prediction.
 
-import pandas as pd
+This module provides functionality for preparing time series sequences
+for TFT models.
+"""
+
 import numpy as np
+import pandas as pd
+from typing import Dict, Optional, Tuple, Union
 import logging
-from pathlib import Path
-from typing import Dict, List, Tuple, Union, Optional
+from datetime import datetime, timedelta
 
 # Configure logging
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+_handler = logging.StreamHandler()
+_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+_handler.setFormatter(_formatter)
+logger.addHandler(_handler)
 
 class SequencePreprocessor:
     """
-    Transforms a multi‐symbol OHLCV DataFrame into
-    formatted data for model training or inference.
+    Preprocessor for time series sequences.
     
-    Supports both LSTM and TFT models.
-
-    Parameters
-    ----------
-    sequence_length : int
-        Number of time steps per input sequence.
-    model_type : str
-        Type of model to preprocess for ('lstm' or 'tft')
+    This class handles the preparation of time series data for TFT models,
+    including sequence creation, validation, and transformation.
+    
+    Attributes:
+        sequence_length (int): Length of input sequences
     """
-    def __init__(self, sequence_length: int = 10, model_type: str = 'lstm'):
+    
+    def __init__(self, sequence_length: int = 10):
+        """
+        Initialize the sequence preprocessor.
+        
+        Args:
+            sequence_length: Length of input sequences
+        """
         self.sequence_length = sequence_length
-        self.model_type = model_type.lower()
-        
-        if self.model_type not in ['lstm', 'tft']:
-            raise ValueError(f"Unsupported model type: {model_type}. Must be 'lstm' or 'tft'.")
-
-    def transform_lstm(self, df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+        logger.info(f"Initialized sequence preprocessor with sequence length {sequence_length}")
+    
+    def prepare_sequence(
+        self,
+        df: pd.DataFrame,
+        target_col: str = 'target',
+        feature_cols: Optional[list] = None
+    ) -> Dict[str, np.ndarray]:
         """
-        Transform data for LSTM model.
+        Prepare sequences for TFT model input.
         
-        Parameters
-        ----------
-        df : pd.DataFrame
-            MultiIndex[ (symbol, datetime) ] with columns
-            ['open','high','low','close','volume'].
-
-        Returns
-        -------
-        X : np.ndarray, shape (n_samples, seq_len, n_features)
-        y : np.ndarray, shape (n_samples,)
-        """
-        # example for single-symbol only; extend for multi
-        symbol = df.index.get_level_values("symbol")[0]
-        data = df.xs(symbol).sort_index()
-        arr = data[["close"]].values  # or your chosen features
-
-        X, y = [], []
-        for i in range(len(arr) - self.sequence_length):
-            X.append(arr[i : i + self.sequence_length])
-            y.append(arr[i + self.sequence_length, 0])
-        return np.array(X), np.array(y)
-
-    def transform_tft(self, df: pd.DataFrame) -> Dict:
-        """
-        Transform data for TFT model.
-        
-        Parameters
-        ----------
-        df : pd.DataFrame
-            MultiIndex[ (symbol, datetime) ] with columns
-            ['open','high','low','close','volume'].
-
-        Returns
-        -------
-        Dict containing formatted data for TFT model
-        """
-        # Ensure data is sorted
-        df = df.sort_index()
-        
-        # Reset index to get symbol and datetime as columns
-        formatted_data = df.reset_index()
-        
-        # Rename columns to match TFT expectations if needed
-        if 'datetime' in formatted_data.columns:
-            formatted_data.rename(columns={'datetime': 'date'}, inplace=True)
+        Args:
+            df: DataFrame containing time series data
+            target_col: Name of the target column
+            feature_cols: List of feature columns to use (defaults to all columns except target)
             
-        # Create time and identifier arrays for TFT
-        time_array = formatted_data['date'].values
-        id_array = formatted_data['symbol'].values
-        
-        # Return dictionary with formatted data
-        return {
-            "inputs": formatted_data,
-            "time": time_array,
-            "identifier": id_array
-        }
-        
-    def transform(self, df: pd.DataFrame) -> Union[Tuple[np.ndarray, np.ndarray], Dict]:
+        Returns:
+            Dictionary containing prepared sequences
+            
+        Raises:
+            ValueError: If data is insufficient or invalid
         """
-        Transform data based on the model type.
-        
-        Parameters
-        ----------
-        df : pd.DataFrame
-            MultiIndex[ (symbol, datetime) ] with columns
-            ['open','high','low','close','volume'].
-
-        Returns
-        -------
-        For LSTM: Tuple of (X, y) arrays
-        For TFT: Dictionary with formatted data
+        try:
+            if df.empty:
+                raise ValueError("Cannot prepare sequences from empty data")
+            
+            if len(df) < self.sequence_length:
+                raise ValueError(
+                    f"Insufficient data: need at least {self.sequence_length} "
+                    f"time steps, got {len(df)}"
+                )
+            
+            # Determine feature columns
+            if feature_cols is None:
+                feature_cols = [col for col in df.columns if col != target_col]
+            
+            if not feature_cols:
+                raise ValueError("No feature columns specified")
+            
+            if target_col not in df.columns:
+                raise ValueError(f"Target column '{target_col}' not found in data")
+            
+            # Create sequences
+            sequences = []
+            targets = []
+            
+            for i in range(len(df) - self.sequence_length + 1):
+                # Extract sequence
+                sequence = df[feature_cols].iloc[i:i + self.sequence_length].values
+                sequences.append(sequence)
+                
+                # Extract target (next value after sequence)
+                if i + self.sequence_length < len(df):
+                    target = df[target_col].iloc[i + self.sequence_length]
+                    targets.append(target)
+            
+            # Convert to numpy arrays
+            X = np.array(sequences)
+            y = np.array(targets)
+            
+            logger.info(
+                f"Prepared {len(X)} sequences of length {self.sequence_length} "
+                f"with {len(feature_cols)} features"
+            )
+            
+            return {
+                'features': X,
+                'targets': y,
+                'feature_names': feature_cols,
+                'target_name': target_col
+            }
+            
+        except Exception as e:
+            logger.error(f"Error preparing sequences: {str(e)}")
+            raise
+    
+    def validate_sequence(self, sequence: Dict[str, np.ndarray]) -> bool:
         """
-        if self.model_type == 'lstm':
-            return self.transform_lstm(df)
-        elif self.model_type == 'tft':
-            return self.transform_tft(df)
-        else:
-            raise ValueError(f"Unsupported model type: {self.model_type}")
+        Validate prepared sequences.
+        
+        Args:
+            sequence: Dictionary containing prepared sequences
+            
+        Returns:
+            True if sequences are valid, False otherwise
+            
+        Raises:
+            ValueError: If sequence dictionary is invalid
+        """
+        try:
+            # Check required keys
+            required_keys = ['features', 'targets']
+            if not all(key in sequence for key in required_keys):
+                raise ValueError(
+                    f"Missing required keys in sequence dictionary. "
+                    f"Expected {required_keys}, got {list(sequence.keys())}"
+                )
+            
+            # Check shapes
+            features = sequence['features']
+            targets = sequence['targets']
+            
+            if not isinstance(features, np.ndarray) or not isinstance(targets, np.ndarray):
+                raise ValueError("Features and targets must be numpy arrays")
+            
+            if len(features) != len(targets):
+                raise ValueError(
+                    f"Number of sequences ({len(features)}) does not match "
+                    f"number of targets ({len(targets)})"
+                )
+            
+            if features.shape[1] != self.sequence_length:
+                raise ValueError(
+                    f"Sequence length mismatch: expected {self.sequence_length}, "
+                    f"got {features.shape[1]}"
+                )
+            
+            # Check for NaN values
+            if np.isnan(features).any() or np.isnan(targets).any():
+                raise ValueError("Sequences contain NaN values")
+            
+            logger.info("Sequence validation passed")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Sequence validation failed: {str(e)}")
+            raise
+    
+    def create_sequence(
+        self,
+        df: pd.DataFrame,
+        target_col: str = 'target',
+        feature_cols: Optional[list] = None,
+        target_length: int = 1
+    ) -> Dict[str, np.ndarray]:
+        """
+        Create sequences with multiple target steps.
+        
+        Args:
+            df: DataFrame containing time series data
+            target_col: Name of the target column
+            feature_cols: List of feature columns to use
+            target_length: Number of target steps to predict
+            
+        Returns:
+            Dictionary containing prepared sequences with multiple target steps
+            
+        Raises:
+            ValueError: If data is insufficient or invalid
+        """
+        try:
+            if df.empty:
+                raise ValueError("Cannot create sequences from empty data")
+            
+            if len(df) < self.sequence_length + target_length:
+                raise ValueError(
+                    f"Insufficient data: need at least {self.sequence_length + target_length} "
+                    f"time steps, got {len(df)}"
+                )
+            
+            # Prepare base sequences
+            sequences = self.prepare_sequence(df, target_col, feature_cols)
+            
+            # Create multi-step targets
+            multi_step_targets = []
+            for i in range(len(sequences['targets']) - target_length + 1):
+                target_sequence = sequences['targets'][i:i + target_length]
+                multi_step_targets.append(target_sequence)
+            
+            # Update sequences dictionary
+            sequences['targets'] = np.array(multi_step_targets)
+            sequences['target_length'] = target_length
+            
+            logger.info(
+                f"Created {len(sequences['features'])} sequences with "
+                f"{target_length} target steps"
+            )
+            
+            return sequences
+            
+        except Exception as e:
+            logger.error(f"Error creating sequences: {str(e)}")
+            raise
 

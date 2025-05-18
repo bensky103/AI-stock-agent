@@ -1,387 +1,326 @@
-"""
-Scaler Handler Module
+"""Scaler handler module for stock prediction.
 
-This module provides classes for handling data scaling and normalization
-for different types of models (LSTM, TFT).
+This module provides functionality for scaling and normalizing data
+for different types of models (TFT).
 """
 
-import os
 import numpy as np
 import pandas as pd
+from typing import Optional, Tuple, Union
+from sklearn.preprocessing import StandardScaler, RobustScaler, MinMaxScaler
+import logging
 from pathlib import Path
 import joblib
-import logging
-from typing import Dict, List, Union, Optional, Any, Tuple
-from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
-
-# Ensure logs directory exists
-os.makedirs('logs', exist_ok=True)
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('logs/scaler_handler.log'),
-        logging.StreamHandler()
-    ]
-)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+_handler = logging.StreamHandler()
+_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+_handler.setFormatter(_formatter)
+logger.addHandler(_handler)
 
 class ScalerHandlerError(Exception):
-    """Exception class for scaler handler errors."""
+    """Custom exception for scaler handler related errors."""
     pass
 
 class ScalerHandler:
     """
-    Base class for handling data scaling and normalization.
+    Base scaler handler for time series data.
+    
+    This class provides functionality for scaling and normalizing time series data
+    for different types of models (TFT).
     
     Attributes:
-        model_type (str): Type of model ('lstm' or 'tft')
-        scaler_type (str): Type of scaler to use
-        scalers (dict): Dictionary of fitted scalers
-        feature_columns (list): List of columns to scale
+        model_type (str): Type of model ('tft')
+        scaler_type (str): Type of scaler to use ('standard', 'robust', or 'minmax')
+        scaler: The actual scaler instance
     """
     
-    def __init__(self, model_type: str = 'lstm', scaler_type: str = 'standard'):
+    def __init__(self, model_type: str = 'tft', scaler_type: str = 'standard'):
         """
         Initialize the scaler handler.
         
         Args:
-            model_type (str): Type of model ('lstm' or 'tft')
-            scaler_type (str): Type of scaler to use ('standard', 'minmax', 'robust')
+            model_type (str): Type of model ('tft')
+            scaler_type (str): Type of scaler to use ('standard', 'robust', or 'minmax')
+            
+        Raises:
+            ScalerHandlerError: If model_type or scaler_type is invalid
         """
-        self.model_type = model_type.lower()
-        self.scaler_type = scaler_type.lower()
-        self.scalers = {}
-        self.feature_columns = []
+        if model_type != 'tft':
+            raise ScalerHandlerError(f"Unsupported model type: {model_type}. Must be 'tft'.")
         
-        if self.model_type not in ['lstm', 'tft']:
-            raise ScalerHandlerError(f"Unsupported model type: {model_type}")
+        if scaler_type not in ['standard', 'robust', 'minmax']:
+            raise ScalerHandlerError(
+                f"Unsupported scaler type: {scaler_type}. "
+                "Must be 'standard', 'robust', or 'minmax'."
+            )
         
-        if self.scaler_type not in ['standard', 'minmax', 'robust']:
-            raise ScalerHandlerError(f"Unsupported scaler type: {scaler_type}")
+        self.model_type = model_type
+        self.scaler_type = scaler_type
+        self.scaler = None
+        
+        # Initialize appropriate scaler
+        if scaler_type == 'standard':
+            self.scaler = StandardScaler()
+        elif scaler_type == 'robust':
+            self.scaler = RobustScaler()
+        else:  # minmax
+            self.scaler = MinMaxScaler()
+        
+        logger.info(f"Initialized {scaler_type} scaler for {model_type} model")
     
-    def _create_scaler(self) -> Any:
-        """Create a new scaler based on the specified type."""
-        if self.scaler_type == 'standard':
-            return StandardScaler()
-        elif self.scaler_type == 'minmax':
-            return MinMaxScaler()
-        elif self.scaler_type == 'robust':
-            return RobustScaler()
-        else:
-            raise ScalerHandlerError(f"Unsupported scaler type: {self.scaler_type}")
-    
-    def fit(self, data: Union[pd.DataFrame, np.ndarray], columns: Optional[List[str]] = None) -> None:
+    def fit_scaler(self, data: pd.DataFrame) -> Optional[object]:
         """
-        Fit scalers to the data.
+        Fit the scaler to the data.
         
         Args:
-            data: Input data to fit scalers on
-            columns: List of column names to scale (for DataFrame input)
-        """
-        raise NotImplementedError("Subclasses must implement this method")
-    
-    def transform(self, data: Union[pd.DataFrame, np.ndarray]) -> Union[pd.DataFrame, np.ndarray]:
-        """
-        Transform data using fitted scalers.
-        
-        Args:
-            data: Input data to transform
+            data: DataFrame to fit the scaler to
             
         Returns:
-            Transformed data
+            Fitted scaler instance or None if fitting fails
+            
+        Raises:
+            ScalerHandlerError: If fitting fails
         """
-        raise NotImplementedError("Subclasses must implement this method")
+        try:
+            if data.empty:
+                raise ScalerHandlerError("Cannot fit scaler to empty data")
+            
+            # Fit scaler
+            self.scaler.fit(data)
+            logger.info(f"Fitted {self.scaler_type} scaler to data")
+            return self.scaler
+            
+        except Exception as e:
+            logger.error(f"Error fitting scaler: {str(e)}")
+            raise ScalerHandlerError(f"Failed to fit scaler: {str(e)}")
     
-    def inverse_transform(self, data: Union[pd.DataFrame, np.ndarray]) -> Union[pd.DataFrame, np.ndarray]:
+    def transform_data(
+        self,
+        data: pd.DataFrame,
+        scaler: Optional[object] = None
+    ) -> pd.DataFrame:
         """
-        Inverse transform scaled data.
+        Transform data using the scaler.
         
         Args:
-            data: Scaled data to inverse transform
+            data: DataFrame to transform
+            scaler: Optional scaler instance to use (defaults to self.scaler)
             
         Returns:
-            Original scale data
-        """
-        raise NotImplementedError("Subclasses must implement this method")
-    
-    def save(self, path: Union[str, Path]) -> None:
-        """
-        Save fitted scalers to disk.
-        
-        Args:
-            path: Directory path to save scalers
-        """
-        path = Path(path)
-        path.mkdir(exist_ok=True, parents=True)
-        
-        for name, scaler in self.scalers.items():
-            scaler_path = path / f"{name}_scaler.joblib"
-            joblib.dump(scaler, scaler_path)
-        
-        # Save metadata
-        metadata = {
-            'model_type': self.model_type,
-            'scaler_type': self.scaler_type,
-            'feature_columns': self.feature_columns
-        }
-        joblib.dump(metadata, path / "scaler_metadata.joblib")
-        
-        logger.info(f"Saved scalers to {path}")
-    
-    def load(self, path: Union[str, Path]) -> None:
-        """
-        Load fitted scalers from disk.
-        
-        Args:
-            path: Directory path to load scalers from
-        """
-        path = Path(path)
-        
-        if not path.exists():
-            raise ScalerHandlerError(f"Path does not exist: {path}")
-        
-        # Load metadata
-        metadata_path = path / "scaler_metadata.joblib"
-        if not metadata_path.exists():
-            raise ScalerHandlerError(f"Metadata file not found: {metadata_path}")
-        
-        metadata = joblib.load(metadata_path)
-        self.model_type = metadata['model_type']
-        self.scaler_type = metadata['scaler_type']
-        self.feature_columns = metadata['feature_columns']
-        
-        # Load scalers
-        self.scalers = {}
-        for column in self.feature_columns:
-            scaler_path = path / f"{column}_scaler.joblib"
-            if not scaler_path.exists():
-                raise ScalerHandlerError(f"Scaler file not found: {scaler_path}")
+            Transformed DataFrame
             
-            self.scalers[column] = joblib.load(scaler_path)
-        
-        logger.info(f"Loaded scalers from {path}")
-
-
-class LSTMScalerHandler(ScalerHandler):
-    """
-    Scaler handler for LSTM models.
-    
-    Handles scaling of time series data for LSTM models.
-    """
-    
-    def __init__(self, scaler_type: str = 'standard'):
+        Raises:
+            ScalerHandlerError: If transformation fails
         """
-        Initialize the LSTM scaler handler.
-        
-        Args:
-            scaler_type (str): Type of scaler to use ('standard', 'minmax', 'robust')
-        """
-        super().__init__(model_type='lstm', scaler_type=scaler_type)
-    
-    def fit(self, data: Union[pd.DataFrame, np.ndarray], columns: Optional[List[str]] = None) -> None:
-        """
-        Fit scalers to the data.
-        
-        Args:
-            data: Input data to fit scalers on
-            columns: List of column names to scale (for DataFrame input)
-        """
-        if isinstance(data, pd.DataFrame):
-            if columns is None:
-                columns = data.columns.tolist()
+        try:
+            if data.empty:
+                raise ScalerHandlerError("Cannot transform empty data")
             
-            self.feature_columns = columns
+            # Use provided scaler or self.scaler
+            scaler_to_use = scaler or self.scaler
+            if scaler_to_use is None:
+                raise ScalerHandlerError("No scaler available for transformation")
             
-            for column in columns:
-                scaler = self._create_scaler()
-                scaler.fit(data[column].values.reshape(-1, 1))
-                self.scalers[column] = scaler
-        else:
-            # For numpy arrays, fit a single scaler
-            scaler = self._create_scaler()
-            scaler.fit(data.reshape(-1, 1))
-            self.scalers['default'] = scaler
-            self.feature_columns = ['default']
+            # Transform data
+            transformed_data = pd.DataFrame(
+                scaler_to_use.transform(data),
+                columns=data.columns,
+                index=data.index
+            )
+            
+            logger.info(f"Transformed data using {self.scaler_type} scaler")
+            return transformed_data
+            
+        except Exception as e:
+            logger.error(f"Error transforming data: {str(e)}")
+            raise ScalerHandlerError(f"Failed to transform data: {str(e)}")
     
-    def transform(self, data: Union[pd.DataFrame, np.ndarray]) -> Union[pd.DataFrame, np.ndarray]:
+    def inverse_transform_data(
+        self,
+        data: pd.DataFrame,
+        scaler: Optional[object] = None
+    ) -> pd.DataFrame:
         """
-        Transform data using fitted scalers.
+        Inverse transform data using the scaler.
         
         Args:
-            data: Input data to transform
+            data: DataFrame to inverse transform
+            scaler: Optional scaler instance to use (defaults to self.scaler)
             
         Returns:
-            Transformed data
+            Inverse transformed DataFrame
+            
+        Raises:
+            ScalerHandlerError: If inverse transformation fails
         """
-        if isinstance(data, pd.DataFrame):
-            result = data.copy()
+        try:
+            if data.empty:
+                raise ScalerHandlerError("Cannot inverse transform empty data")
             
-            for column in self.feature_columns:
-                if column in result.columns:
-                    scaler = self.scalers.get(column)
-                    if scaler is not None:
-                        result[column] = scaler.transform(result[column].values.reshape(-1, 1))
+            # Use provided scaler or self.scaler
+            scaler_to_use = scaler or self.scaler
+            if scaler_to_use is None:
+                raise ScalerHandlerError("No scaler available for inverse transformation")
             
-            return result
-        else:
-            # For numpy arrays, use the default scaler
-            scaler = self.scalers.get('default')
-            if scaler is None:
-                raise ScalerHandlerError("No default scaler found for numpy array")
+            # Inverse transform data
+            original_data = pd.DataFrame(
+                scaler_to_use.inverse_transform(data),
+                columns=data.columns,
+                index=data.index
+            )
             
-            return scaler.transform(data.reshape(-1, 1)).reshape(data.shape)
+            logger.info(f"Inverse transformed data using {self.scaler_type} scaler")
+            return original_data
+            
+        except Exception as e:
+            logger.error(f"Error inverse transforming data: {str(e)}")
+            raise ScalerHandlerError(f"Failed to inverse transform data: {str(e)}")
     
-    def inverse_transform(self, data: Union[pd.DataFrame, np.ndarray]) -> Union[pd.DataFrame, np.ndarray]:
+    def save_scaler(self, path: Union[str, Path]) -> None:
         """
-        Inverse transform scaled data.
+        Save the scaler to disk.
         
         Args:
-            data: Scaled data to inverse transform
+            path: Path to save the scaler to
+            
+        Raises:
+            ScalerHandlerError: If saving fails
+        """
+        try:
+            if self.scaler is None:
+                raise ScalerHandlerError("No scaler to save")
+            
+            path = Path(path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            
+            joblib.dump(self.scaler, path)
+            logger.info(f"Saved scaler to {path}")
+            
+        except Exception as e:
+            logger.error(f"Error saving scaler: {str(e)}")
+            raise ScalerHandlerError(f"Failed to save scaler: {str(e)}")
+    
+    @classmethod
+    def load_scaler(cls, path: Union[str, Path]) -> 'ScalerHandler':
+        """
+        Load a scaler from disk.
+        
+        Args:
+            path: Path to load the scaler from
             
         Returns:
-            Original scale data
+            ScalerHandler instance with loaded scaler
+            
+        Raises:
+            ScalerHandlerError: If loading fails
         """
-        if isinstance(data, pd.DataFrame):
-            result = data.copy()
+        try:
+            path = Path(path)
+            if not path.exists():
+                raise ScalerHandlerError(f"Scaler file not found: {path}")
             
-            for column in self.feature_columns:
-                if column in result.columns:
-                    scaler = self.scalers.get(column)
-                    if scaler is not None:
-                        result[column] = scaler.inverse_transform(result[column].values.reshape(-1, 1))
+            # Create instance
+            instance = cls()
             
-            return result
-        else:
-            # For numpy arrays, use the default scaler
-            scaler = self.scalers.get('default')
-            if scaler is None:
-                raise ScalerHandlerError("No default scaler found for numpy array")
+            # Load scaler
+            instance.scaler = joblib.load(path)
+            logger.info(f"Loaded scaler from {path}")
             
-            return scaler.inverse_transform(data.reshape(-1, 1)).reshape(data.shape)
-
+            return instance
+            
+        except Exception as e:
+            logger.error(f"Error loading scaler: {str(e)}")
+            raise ScalerHandlerError(f"Failed to load scaler: {str(e)}")
 
 class TFTScalerHandler(ScalerHandler):
     """
     Scaler handler for TFT models.
     
-    Handles scaling of time series data for TFT models.
+    This class extends the base ScalerHandler to provide specific
+    functionality for scaling time series data for TFT models.
     """
     
-    def __init__(self, scaler_type: str = 'robust'):
+    def __init__(self, scaler_type: str = 'standard'):
         """
         Initialize the TFT scaler handler.
         
         Args:
-            scaler_type (str): Type of scaler to use ('standard', 'minmax', 'robust')
+            scaler_type: Type of scaler to use ('standard', 'robust', or 'minmax')
         """
         super().__init__(model_type='tft', scaler_type=scaler_type)
-        self.target_scaler = None
-        self.target_column = None
     
-    def fit(self, data: pd.DataFrame, columns: Optional[List[str]] = None, target_column: str = 'close') -> None:
+    def scale_features(self, data: pd.DataFrame) -> pd.DataFrame:
         """
-        Fit scalers to the data.
+        Scale features for TFT model input.
         
         Args:
-            data: Input data to fit scalers on
-            columns: List of column names to scale
-            target_column: Name of the target column
-        """
-        if columns is None:
-            # Default columns for TFT models
-            columns = ['open', 'high', 'low', 'close', 'volume']
-            # Filter to only include columns that exist in the data
-            columns = [col for col in columns if col in data.columns]
-        
-        self.feature_columns = columns
-        self.target_column = target_column
-        
-        # Fit scalers for each column
-        for column in columns:
-            if column in data.columns:
-                scaler = self._create_scaler()
-                # Handle multi-index DataFrame
-                if isinstance(data.index, pd.MultiIndex):
-                    # Extract all values for this column across all symbols
-                    values = data[column].values.reshape(-1, 1)
-                else:
-                    values = data[column].values.reshape(-1, 1)
-                
-                scaler.fit(values)
-                self.scalers[column] = scaler
-                
-                # Save a separate target scaler
-                if column == target_column:
-                    self.target_scaler = scaler
-    
-    def transform(self, data: pd.DataFrame) -> pd.DataFrame:
-        """
-        Transform data using fitted scalers.
-        
-        Args:
-            data: Input data to transform
+            data: DataFrame containing features to scale
             
         Returns:
-            Transformed data
+            Scaled DataFrame
+            
+        Raises:
+            ScalerHandlerError: If scaling fails
         """
-        result = data.copy()
-        
-        for column in self.feature_columns:
-            if column in result.columns and column in self.scalers:
-                scaler = self.scalers[column]
-                # Handle multi-index DataFrame
-                if isinstance(result.index, pd.MultiIndex):
-                    # Transform each symbol's data separately to maintain the index
-                    for symbol in result.index.get_level_values('symbol').unique():
-                        idx = result.index.get_level_values('symbol') == symbol
-                        values = result.loc[idx, column].values.reshape(-1, 1)
-                        result.loc[idx, column] = scaler.transform(values)
-                else:
-                    result[column] = scaler.transform(result[column].values.reshape(-1, 1))
-        
-        return result
+        try:
+            if data.empty:
+                raise ScalerHandlerError("Cannot scale empty data")
+            
+            # Fit scaler if not already fitted
+            if self.scaler is None:
+                self.fit_scaler(data)
+            
+            # Transform data
+            scaled_data = self.transform_data(data)
+            
+            return scaled_data
+            
+        except Exception as e:
+            logger.error(f"Error scaling features: {str(e)}")
+            raise ScalerHandlerError(f"Failed to scale features: {str(e)}")
     
-    def inverse_transform_target(self, predictions: np.ndarray) -> np.ndarray:
+    def prepare_tft_input(
+        self,
+        data: pd.DataFrame,
+        target_col: str = 'target'
+    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
-        Inverse transform scaled target predictions.
+        Prepare input data for TFT model.
         
         Args:
-            predictions: Scaled predictions to inverse transform
+            data: DataFrame containing features and target
+            target_col: Name of the target column
             
         Returns:
-            Original scale predictions
-        """
-        if self.target_scaler is None:
-            raise ScalerHandlerError("Target scaler not fitted")
-        
-        return self.target_scaler.inverse_transform(predictions.reshape(-1, 1)).reshape(predictions.shape)
-    
-    def inverse_transform(self, data: pd.DataFrame) -> pd.DataFrame:
-        """
-        Inverse transform all scaled data.
-        
-        Args:
-            data: Scaled data to inverse transform
+            Tuple of (scaled_features, scaled_target)
             
-        Returns:
-            Original scale data
+        Raises:
+            ScalerHandlerError: If preparation fails
         """
-        result = data.copy()
-        
-        for column in self.feature_columns:
-            if column in result.columns and column in self.scalers:
-                scaler = self.scalers[column]
-                # Handle multi-index DataFrame
-                if isinstance(result.index, pd.MultiIndex):
-                    # Transform each symbol's data separately to maintain the index
-                    for symbol in result.index.get_level_values('symbol').unique():
-                        idx = result.index.get_level_values('symbol') == symbol
-                        values = result.loc[idx, column].values.reshape(-1, 1)
-                        result.loc[idx, column] = scaler.inverse_transform(values)
-                else:
-                    result[column] = scaler.inverse_transform(result[column].values.reshape(-1, 1))
-        
-        return result 
+        try:
+            if data.empty:
+                raise ScalerHandlerError("Cannot prepare empty data")
+            
+            if target_col not in data.columns:
+                raise ScalerHandlerError(f"Target column '{target_col}' not found in data")
+            
+            # Split features and target
+            features = data.drop(columns=[target_col])
+            target = data[[target_col]]
+            
+            # Scale features
+            scaled_features = self.scale_features(features)
+            
+            # Scale target
+            if self.scaler is None:
+                self.fit_scaler(target)
+            scaled_target = self.transform_data(target)
+            
+            return scaled_features, scaled_target
+            
+        except Exception as e:
+            logger.error(f"Error preparing TFT input: {str(e)}")
+            raise ScalerHandlerError(f"Failed to prepare TFT input: {str(e)}") 

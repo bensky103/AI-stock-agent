@@ -1,4 +1,8 @@
-"""Enhanced feature engineering for stock prediction."""
+"""Feature engineering module for stock prediction.
+
+This module provides functionality for generating and transforming features
+for TFT-based stock prediction models.
+"""
 
 import pandas as pd
 import numpy as np
@@ -88,7 +92,7 @@ class FeatureEngineer:
     2. Market regime detection
     3. Feature selection and dimensionality reduction
     4. Advanced data normalization
-    5. Sequence preparation for LSTM
+    5. Sequence preparation for TFT models
     """
     
     def __init__(
@@ -134,10 +138,10 @@ class FeatureEngineer:
         self.selected_features = None
         self.pca_components = None
         
-        logger.info(f"Initialized feature engineer with sequence length {sequence_length}, "
-                   f"{len(self.technical_indicators)} technical indicators, "
-                   f"feature selection={use_feature_selection}, PCA={use_pca}, "
-                   f"regime detection={detect_regime}")
+        logger.info(
+            f"Initialized feature engineer with {len(self.technical_indicators)} "
+            f"technical indicators"
+        )
     
     def calculate_technical_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """Calculate technical indicators."""
@@ -261,7 +265,19 @@ class FeatureEngineer:
         sentiment_data: Optional[pd.DataFrame] = None,
         fit: bool = False
     ) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
-        """Prepare sequences for LSTM model."""
+        """Prepare sequences for TFT model input.
+        
+        Args:
+            market_data: DataFrame containing market data
+            sentiment_data: Optional DataFrame containing sentiment data
+            fit: Whether to fit transformers on the data
+            
+        Returns:
+            Tuple of (market_features, targets, sentiment_features)
+            market_features: numpy array of shape (n_samples, sequence_length, n_features)
+            targets: numpy array of shape (n_samples, prediction_horizon)
+            sentiment_features: Optional numpy array of shape (n_samples, n_sentiment_features)
+        """
         # Calculate technical indicators
         market_with_indicators = self.calculate_technical_indicators(market_data)
         
@@ -272,7 +288,14 @@ class FeatureEngineer:
         )
         
         # Prepare sequences
-        X, y = self.sequence_preprocessor.transform(market_normalized)
+        sequences = self.sequence_preprocessor.prepare_sequence(
+            market_normalized,
+            target_col='close',
+            feature_cols=[col for col in market_normalized.columns if col != 'close']
+        )
+        
+        X = sequences['features']
+        y = sequences['targets']
         
         # Apply feature selection if enabled
         if self.use_feature_selection:

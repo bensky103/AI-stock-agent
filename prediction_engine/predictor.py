@@ -1,4 +1,10 @@
-"""Enhanced prediction engine for stock price prediction."""
+"""Prediction engine module for stock price prediction.
+
+This module provides:
+1. Enhanced stock predictor with TFT model
+2. Feature engineering and sequence preparation
+3. Model training and prediction pipeline
+"""
 
 import pandas as pd
 import numpy as np
@@ -13,9 +19,15 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from sklearn.model_selection import TimeSeriesSplit
 import optuna
 from optuna.trial import Trial
+from torch import nn
+from torch.utils.data import DataLoader, TensorDataset
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+import joblib
 
-from .model import EnhancedLSTM, create_model
 from .feature_engineering import FeatureEngineer
+from .sequence_preprocessor import SequencePreprocessor
+from .scaler_handler import ScalerHandler, ScalerHandlerError
+from .tft_predictor import TFTPredictor, TFTPredictorError
 from data_input.market_feed import get_market_data
 from data_input.sentiment_manager import get_sentiment_data
 
@@ -29,29 +41,64 @@ logger.addHandler(_handler)
 
 class EnhancedStockPredictor:
     """
-    Enhanced prediction engine for stock price prediction.
+    Enhanced stock predictor using TFT model.
     
-    This class combines:
-    1. Market data from market_data_manager
-    2. Sentiment data from sentiment_manager
-    3. Enhanced LSTM model with attention and uncertainty
-    4. Advanced feature engineering
-    5. Model ensemble support
+    This class provides a complete pipeline for stock price prediction using
+    the Temporal Fusion Transformer (TFT) model, including:
+    1. Feature engineering and sequence preparation
+    2. Data scaling and normalization
+    3. Model training and evaluation
+    4. Prediction generation with uncertainty estimates
     """
     
     def __init__(
         self,
-        sequence_length: int = 20,  # Updated to match saved models
-        prediction_horizon: int = 5,  # Updated to match saved models
-        device: str = 'cpu'  # Force CPU usage for VM
+        sequence_length: int = 20,
+        prediction_horizon: int = 5,
+        device: str = 'cpu',
+        model_type: str = 'tft',
+        use_feature_selection: bool = True,
+        use_pca: bool = False,
+        detect_regime: bool = True
     ):
-        """Initialize the enhanced stock predictor."""
+        """
+        Initialize the enhanced stock predictor.
+        
+        Args:
+            sequence_length: Length of input sequences
+            prediction_horizon: Number of steps to predict
+            device: Device to use for model ('cpu' or 'cuda')
+            model_type: Type of model to use (only 'tft' supported)
+            use_feature_selection: Whether to use feature selection
+            use_pca: Whether to use PCA for dimensionality reduction
+            detect_regime: Whether to detect market regimes
+        """
+        if model_type != 'tft':
+            raise ValueError("Only 'tft' model type is supported")
+        
         self.sequence_length = sequence_length
         self.prediction_horizon = prediction_horizon
         self.device = device
+        self.model_type = model_type
         self.models = {}  # Dictionary to store models for each symbol
         self.feature_engineer = None
         self.saved_models_dir = Path("saved_models")
+        
+        # Initialize components
+        self.feature_engineer = FeatureEngineer(
+            sequence_length=sequence_length,
+            prediction_horizon=prediction_horizon,
+            use_feature_selection=use_feature_selection,
+            use_pca=use_pca,
+            detect_regime=detect_regime
+        )
+        self.sequence_preprocessor = SequencePreprocessor(sequence_length)
+        self.scaler_handler = ScalerHandler(model_type='tft')
+        self.predictor = TFTPredictor(
+            sequence_length=sequence_length,
+            prediction_horizon=prediction_horizon,
+            device=device
+        )
         
         # Initialize feature engineer with settings from saved models
         self.feature_engineer = FeatureEngineer(
@@ -74,8 +121,10 @@ class EnhancedStockPredictor:
             logger.warning("No global training configuration found")
             self.training_config = {}
         
-        logger.info(f"Initialized enhanced stock predictor with sequence length {sequence_length}, "
-                   f"prediction horizon {prediction_horizon}")
+        logger.info(
+            f"Initialized enhanced stock predictor with {model_type} model, "
+            f"sequence length {sequence_length}, prediction horizon {prediction_horizon}"
+        )
     
     def load_model(self, symbol: str) -> None:
         """Load model for a specific symbol from saved_models directory."""
@@ -91,17 +140,15 @@ class EnhancedStockPredictor:
             with open(config_path, 'r') as f:
                 config = json.load(f)
             
-            # Create model with saved configuration
-            model = create_model(
-                input_size=config['input_size'],
+            # Create TFT model with saved configuration
+            model = TFTPredictor(
+                sequence_length=config['sequence_length'],
+                prediction_horizon=config['prediction_horizon'],
                 hidden_size=config['hidden_size'],
+                num_heads=config['num_heads'],
                 num_layers=config['num_layers'],
                 dropout=config['dropout'],
-                use_sentiment=config.get('use_sentiment', True),
-                bidirectional=config.get('bidirectional', True),
-                use_attention=config.get('use_attention', True),
-                use_residual=config.get('use_residual', True),
-                estimate_uncertainty=config.get('estimate_uncertainty', True)
+                device=self.device
             )
             
             # Load weights
@@ -261,16 +308,14 @@ class EnhancedStockPredictor:
                 
                 # Create model
                 input_size = features.shape[-1]
-                model = create_model(
-                    input_size=input_size,
+                model = TFTPredictor(
+                    sequence_length=self.sequence_length,
+                    prediction_horizon=self.prediction_horizon,
                     hidden_size=64,  # Default values for testing
+                    num_heads=8,
                     num_layers=2,
                     dropout=0.2,
-                    use_sentiment=sentiment_features is not None,
-                    bidirectional=True,
-                    use_attention=True,
-                    use_residual=True,
-                    estimate_uncertainty=True
+                    device=self.device
                 )
                 model.to(self.device)
                 
@@ -344,15 +389,12 @@ class EnhancedStockPredictor:
                     # Save model configuration
                     config_path = save_dir / f"{symbol}_model.json"
                     config = {
-                        'input_size': input_size,
+                        'sequence_length': self.sequence_length,
+                        'prediction_horizon': self.prediction_horizon,
                         'hidden_size': 64,
+                        'num_heads': 8,
                         'num_layers': 2,
-                        'dropout': 0.2,
-                        'use_sentiment': sentiment_features is not None,
-                        'bidirectional': True,
-                        'use_attention': True,
-                        'use_residual': True,
-                        'estimate_uncertainty': True
+                        'dropout': 0.2
                     }
                     with open(config_path, 'w') as f:
                         json.dump(config, f, indent=4)
@@ -374,7 +416,11 @@ if __name__ == "__main__":
     predictor = EnhancedStockPredictor(
         sequence_length=10,
         ensemble_size=1,  # Single model for memory efficiency
-        memory_efficient=True  # Enable memory-efficient mode
+        memory_efficient=True,  # Enable memory-efficient mode
+        model_type='tft',
+        use_feature_selection=True,
+        use_pca=False,
+        detect_regime=True
     )
     
     # Train model with reduced parameters

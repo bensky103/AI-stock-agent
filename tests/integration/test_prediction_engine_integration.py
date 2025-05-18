@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from prediction_engine.sequence_preprocessor import SequencePreprocessor
 from prediction_engine.feature_engineering import FeatureEngineer
 from prediction_engine.scaler_handler import ScalerHandler
-from prediction_engine.predictor import BasePredictor
+from prediction_engine.predictor import EnhancedStockPredictor
 
 class TestPredictionEngineIntegration:
     @pytest.fixture
@@ -14,13 +14,17 @@ class TestPredictionEngineIntegration:
         preprocessor = SequencePreprocessor(config=test_config)
         feature_engineer = FeatureEngineer(config=test_config)
         scaler_handler = ScalerHandler(config=test_config)
-        base_predictor = BasePredictor(config=test_config)
+        predictor = EnhancedStockPredictor(
+            sequence_length=20,
+            prediction_horizon=5,
+            device='cpu'
+        )
         
         return {
             'preprocessor': preprocessor,
             'feature_engineer': feature_engineer,
             'scaler_handler': scaler_handler,
-            'base_predictor': base_predictor
+            'predictor': predictor
         }
     
     @pytest.fixture

@@ -43,20 +43,29 @@ sentiment:
 
 # Model Configuration
 model:
-  lstm:
-    sequence_length: 5
-    hidden_size: 32
-    num_layers: 1
+  tft:
+    sequence_length: 20
+    prediction_horizon: 5
+    hidden_size: 64
+    num_heads: 4
+    num_layers: 2
     dropout: 0.1
-    bidirectional: false
-  training:
-    batch_size: 16
+    attention_dropout: 0.1
+    hidden_continuous_size: 32
+    loss: mse
     learning_rate: 0.001
-    max_epochs: 2
-    early_stopping_patience: 2
+    batch_size: 32
+    max_epochs: 100
+    early_stopping_patience: 10
+    validation_split: 0.2
+  training:
+    batch_size: 32
+    learning_rate: 0.001
+    max_epochs: 100
+    early_stopping_patience: 10
     validation_split: 0.2
   prediction:
-    horizon: 1
+    horizon: 5
     confidence_threshold: 0.6
   retraining:
     frequency: 1d
