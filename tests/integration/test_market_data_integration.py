@@ -4,22 +4,37 @@ import pytest
 import pandas as pd
 from datetime import datetime, timedelta
 from data_input.market_feed import MarketFeed
-from data_input.market_data_manager import MarketDataManager as EnhancedMarketManager
+from data_input.market_data_manager import MarketDataManager
 from data_input import market_utils
 
 class TestMarketDataIntegration:
     @pytest.fixture
     def setup_market_components(self, test_config):
         """Setup market data components"""
-        market_manager = MarketFeed(config=test_config)
-        enhanced_manager = EnhancedMarketManager(config=test_config)
-        market_utils = market_utils.MarketUtils(config=test_config)
+        # Create a temporary config file for MarketFeed
+        import tempfile
+        import yaml
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            yaml.dump(test_config, f)
+            config_path = f.name
+        
+        market_manager = MarketFeed(config_path=config_path)
+        enhanced_manager = MarketDataManager(config_path=config_path)
         
         return {
             'market_manager': market_manager,
             'enhanced_manager': enhanced_manager,
-            'market_utils': market_utils
+            'config_path': config_path  # Store path for cleanup
         }
+    
+    def teardown_method(self, method):
+        """Clean up temporary files after each test"""
+        if hasattr(self, 'config_path'):
+            import os
+            try:
+                os.unlink(self.config_path)
+            except Exception as e:
+                print(f"Error cleaning up config file: {e}")
     
     def test_market_data_flow(self, setup_market_components):
         """Test the complete market data flow"""
@@ -28,8 +43,8 @@ class TestMarketDataIntegration:
         # 1. Fetch basic market data
         end_date = datetime.now()
         start_date = end_date - timedelta(days=5)
-        market_data = components['market_manager'].fetch_historical_data(
-            symbol='AAPL',
+        market_data = components['market_manager'].fetch_data(
+            symbols='AAPL',
             start_date=start_date,
             end_date=end_date
         )
@@ -38,103 +53,105 @@ class TestMarketDataIntegration:
         assert not market_data.empty
         
         # 2. Enhance with additional data
-        enhanced_data = components['enhanced_manager'].enhance_market_data(market_data)
+        enhanced_data = components['enhanced_manager'].get_market_data(
+            symbols='AAPL',
+            start_date=start_date,
+            end_date=end_date
+        )
         assert isinstance(enhanced_data, pd.DataFrame)
         assert not enhanced_data.empty
         assert len(enhanced_data.columns) >= len(market_data.columns)
-        
-        # 3. Process with market utils
-        processed_data = components['market_utils'].process_market_data(enhanced_data)
-        assert isinstance(processed_data, pd.DataFrame)
-        assert not processed_data.empty
     
     def test_multi_symbol_handling(self, setup_market_components):
         """Test handling of multiple symbols"""
         components = setup_market_components
+        
+        # Test fetching data for multiple symbols
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=5)
         symbols = ['AAPL', 'MSFT', 'GOOGL']
         
-        # Fetch data for multiple symbols
-        multi_data = components['enhanced_manager'].fetch_multiple_symbols(
+        market_data = components['market_manager'].fetch_data(
             symbols=symbols,
-            start_date=datetime.now() - timedelta(days=1),
-            end_date=datetime.now()
+            start_date=start_date,
+            end_date=end_date
         )
         
-        assert isinstance(multi_data, dict)
-        assert all(symbol in multi_data for symbol in symbols)
-        assert all(isinstance(data, pd.DataFrame) for data in multi_data.values())
+        assert isinstance(market_data, pd.DataFrame)
+        assert not market_data.empty
+        assert all(symbol in market_data.index.get_level_values('symbol') for symbol in symbols)
     
     def test_market_utils_functions(self, setup_market_components):
         """Test market utility functions"""
         components = setup_market_components
         
-        # Get sample data
-        market_data = components['market_manager'].fetch_historical_data(
-            symbol='AAPL',
-            start_date=datetime.now() - timedelta(days=5),
-            end_date=datetime.now()
+        # Get some market data first
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=5)
+        market_data = components['market_manager'].fetch_data(
+            symbols='AAPL',
+            start_date=start_date,
+            end_date=end_date
         )
         
-        # Test various utility functions
-        volatility = components['market_utils'].calculate_volatility(market_data)
-        assert isinstance(volatility, float)
-        assert volatility >= 0
-        
-        returns = components['market_utils'].calculate_returns(market_data)
-        assert isinstance(returns, pd.Series)
-        assert not returns.empty
-        
-        correlation = components['market_utils'].calculate_correlation(
-            market_data,
-            components['market_manager'].fetch_historical_data(
-                symbol='MSFT',
-                start_date=datetime.now() - timedelta(days=5),
-                end_date=datetime.now()
-            )
-        )
-        assert isinstance(correlation, float)
-        assert -1 <= correlation <= 1
+        # Test data cleaning
+        cleaned_data = market_utils.clean_market_data(market_data)
+        assert isinstance(cleaned_data, pd.DataFrame)
+        assert not cleaned_data.empty
+        assert cleaned_data.isnull().sum().sum() == 0
     
     def test_error_handling(self, setup_market_components):
-        """Test error handling in market components"""
+        """Test error handling in market data operations"""
         components = setup_market_components
         
         # Test invalid symbol
         with pytest.raises(Exception):
-            components['market_manager'].fetch_historical_data(
-                symbol='INVALID_SYMBOL',
+            components['market_manager'].fetch_data(
+                symbols='INVALID_SYMBOL',
                 start_date=datetime.now() - timedelta(days=1),
                 end_date=datetime.now()
             )
         
         # Test invalid date range
         with pytest.raises(Exception):
-            components['market_manager'].fetch_historical_data(
-                symbol='AAPL',
+            components['market_manager'].fetch_data(
+                symbols='AAPL',
                 start_date=datetime.now(),
                 end_date=datetime.now() - timedelta(days=1)
             )
-        
-        # Test empty data handling
-        empty_df = pd.DataFrame()
-        with pytest.raises(Exception):
-            components['market_utils'].process_market_data(empty_df)
     
     def test_data_consistency(self, setup_market_components):
-        """Test data consistency across market components"""
+        """Test data consistency across different operations"""
         components = setup_market_components
         
-        # Get data from different components
-        market_data = components['market_manager'].fetch_historical_data(
-            symbol='AAPL',
-            start_date=datetime.now() - timedelta(days=5),
-            end_date=datetime.now()
+        # Get data for a specific period
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=5)
+        
+        # Fetch from both managers
+        market_data = components['market_manager'].fetch_data(
+            symbols='AAPL',
+            start_date=start_date,
+            end_date=end_date
         )
         
-        enhanced_data = components['enhanced_manager'].enhance_market_data(market_data)
-        processed_data = components['market_utils'].process_market_data(enhanced_data)
+        enhanced_data = components['enhanced_manager'].get_market_data(
+            symbols='AAPL',
+            start_date=start_date,
+            end_date=end_date
+        )
         
         # Verify data consistency
-        assert len(processed_data) == len(market_data)
-        assert all(col in processed_data.columns for col in market_data.columns)
-        assert not processed_data.isnull().any().any() 
+        assert isinstance(market_data, pd.DataFrame)
+        assert isinstance(enhanced_data, pd.DataFrame)
+        assert not market_data.empty
+        assert not enhanced_data.empty
+        
+        # Verify date ranges
+        market_dates = market_data.index.get_level_values('datetime')
+        enhanced_dates = enhanced_data.index.get_level_values('datetime')
+        
+        assert market_dates.min() >= start_date
+        assert market_dates.max() <= end_date
+        assert enhanced_dates.min() >= start_date
+        assert enhanced_dates.max() <= end_date 

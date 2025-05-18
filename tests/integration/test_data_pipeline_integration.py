@@ -12,15 +12,32 @@ class TestDataPipelineIntegration:
     @pytest.fixture
     def setup_pipeline(self, test_config):
         """Setup the complete data pipeline with all necessary components"""
-        market_manager = MarketFeed(config=test_config)
+        # Create a temporary config file for MarketFeed
+        import tempfile
+        import yaml
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            yaml.dump(test_config, f)
+            config_path = f.name
+        
+        market_manager = MarketFeed(config_path=config_path)
         news_manager = NewsSentimentAnalyzer(config=test_config)
         preprocessor = SequencePreprocessor(config=test_config)
         
         return {
             'market_manager': market_manager,
             'news_manager': news_manager,
-            'preprocessor': preprocessor
+            'preprocessor': preprocessor,
+            'config_path': config_path  # Store path for cleanup
         }
+    
+    def teardown_method(self, method):
+        """Clean up temporary files after each test"""
+        if hasattr(self, 'config_path'):
+            import os
+            try:
+                os.unlink(self.config_path)
+            except Exception as e:
+                print(f"Error cleaning up config file: {e}")
     
     def test_market_data_to_preprocessing_flow(self, setup_pipeline):
         """Test the complete flow from market data fetching to preprocessing"""
@@ -29,8 +46,8 @@ class TestDataPipelineIntegration:
         # 1. Fetch market data
         end_date = datetime.now()
         start_date = end_date - timedelta(days=5)
-        market_data = pipeline['market_manager'].fetch_historical_data(
-            symbol='AAPL',
+        market_data = pipeline['market_manager'].fetch_data(  # Changed from fetch_historical_data to fetch_data
+            symbols='AAPL',  # Changed from symbol to symbols
             start_date=start_date,
             end_date=end_date
         )
@@ -57,8 +74,8 @@ class TestDataPipelineIntegration:
         # 1. Fetch market data
         end_date = datetime.now()
         start_date = end_date - timedelta(days=1)
-        market_data = pipeline['market_manager'].fetch_historical_data(
-            symbol='AAPL',
+        market_data = pipeline['market_manager'].fetch_data(  # Changed from fetch_historical_data to fetch_data
+            symbols='AAPL',  # Changed from symbol to symbols
             start_date=start_date,
             end_date=end_date
         )
@@ -86,16 +103,16 @@ class TestDataPipelineIntegration:
         
         # Test with invalid symbol
         with pytest.raises(Exception):
-            pipeline['market_manager'].fetch_historical_data(
-                symbol='INVALID_SYMBOL',
+            pipeline['market_manager'].fetch_data(  # Changed from fetch_historical_data to fetch_data
+                symbols='INVALID_SYMBOL',  # Changed from symbol to symbols
                 start_date=datetime.now() - timedelta(days=1),
                 end_date=datetime.now()
             )
         
         # Test with invalid date range
         with pytest.raises(Exception):
-            pipeline['market_manager'].fetch_historical_data(
-                symbol='AAPL',
+            pipeline['market_manager'].fetch_data(  # Changed from fetch_historical_data to fetch_data
+                symbols='AAPL',  # Changed from symbol to symbols
                 start_date=datetime.now(),
                 end_date=datetime.now() - timedelta(days=1)  # End date before start date
             )
@@ -112,8 +129,8 @@ class TestDataPipelineIntegration:
         # 1. Get market data
         end_date = datetime.now()
         start_date = end_date - timedelta(days=5)
-        market_data = pipeline['market_manager'].fetch_historical_data(
-            symbol='AAPL',
+        market_data = pipeline['market_manager'].fetch_data(  # Changed from fetch_historical_data to fetch_data
+            symbols='AAPL',  # Changed from symbol to symbols
             start_date=start_date,
             end_date=end_date
         )
