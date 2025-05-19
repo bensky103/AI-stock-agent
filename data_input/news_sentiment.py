@@ -369,243 +369,81 @@ def _calculate_credibility_score(
         return 0.5  # Default score for unknown sources
 
 class NewsSentimentAnalyzer:
-    """Analyzes news sentiment for financial symbols."""
+    """Analyzes news and social media sentiment for stocks."""
     
-    def __init__(
-        self,
-        config_path: Optional[Union[str, Path]] = None,
-        cache_dir: Union[str, Path] = "data/sentiment_cache"
-    ):
-        """Initialize the news sentiment analyzer.
-        
-        Args:
-            config_path: Path to configuration file
-            cache_dir: Directory for caching sentiment data
-        """
-        self.cache_dir = Path(cache_dir)
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        
-        self.config = {}
-        if config_path:
-            self.load_config(config_path)
-        
-        self.sentiment_cache: Dict[str, pd.DataFrame] = {}
-        self.last_update: Dict[str, datetime] = {}
-    
-    def load_config(self, config_path: Union[str, Path]) -> None:
-        """Load configuration from YAML file.
+    def __init__(self, config_path: Optional[Union[str, Path]] = None):
+        """Initialize the sentiment analyzer.
         
         Args:
             config_path: Path to configuration file
         """
-        try:
-            with open(config_path, 'r') as f:
-                self.config = yaml.safe_load(f).get('sentiment', {})
-            logger.info(f"Loaded configuration from {config_path}")
-        except Exception as e:
-            logger.error(f"Error loading config from {config_path}: {e}")
-            raise
+        self.config = load_config(config_path) if config_path else {}
+        logger.info(f"Loaded configuration from {config_path}")
     
     def get_sentiment(
         self,
         symbols: Union[str, List[str]],
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None,
-        force_update: bool = False
+        start_date: Optional[Union[str, datetime]] = None,
+        end_date: Optional[Union[str, datetime]] = None,
+        sources: Optional[List[str]] = None
     ) -> Dict[str, pd.DataFrame]:
-        """Get sentiment data for symbols.
+        """Get sentiment analysis for news and social media data.
         
         Args:
-            symbols: Single symbol or list of symbols
-            start_date: Start date for sentiment analysis
-            end_date: End date for sentiment analysis
-            force_update: Whether to force update from source
+            symbols: Stock symbol(s) to analyze
+            start_date: Start date for analysis
+            end_date: End date for analysis
+            sources: List of data sources to use (default: all available)
             
         Returns:
-            Dict mapping symbols to their sentiment DataFrames
+            Dictionary mapping symbols to DataFrames containing sentiment data
         """
         if isinstance(symbols, str):
             symbols = [symbols]
         
+        if sources is None:
+            sources = ['news', 'twitter', 'reddit']
+        
+        # Convert dates to datetime if strings
+        if isinstance(start_date, str):
+            start_date = datetime.strptime(start_date, '%Y-%m-%d')
+        if isinstance(end_date, str):
+            end_date = datetime.strptime(end_date, '%Y-%m-%d')
+        
+        # Set default dates if not provided
         if start_date is None:
-            start_date = datetime.now() - timedelta(days=7)
+            start_date = datetime.now() - timedelta(days=30)
         if end_date is None:
             end_date = datetime.now()
         
-        data = {}
+        # Get sentiment data for all symbols
+        all_data = get_news_sentiment(
+            symbols=symbols,
+            start_date=start_date,
+            end_date=end_date,
+            sources=sources,
+            config_path=self.config.get('config_path')
+        )
+        
+        # Split data by symbol
+        result = {}
         for symbol in symbols:
-            if force_update or self._needs_update(symbol):
-                try:
-                    df = self._fetch_and_analyze(symbol, start_date, end_date)
-                    data[symbol] = df
-                except Exception as e:
-                    logger.error(f"Error updating sentiment for {symbol}: {e}")
-                    if symbol in self.sentiment_cache:
-                        data[symbol] = self.sentiment_cache[symbol]
-            else:
-                if symbol in self.sentiment_cache:
-                    data[symbol] = self.sentiment_cache[symbol]
-                else:
-                    try:
-                        df = self._fetch_and_analyze(symbol, start_date, end_date)
-                        data[symbol] = df
-                    except Exception as e:
-                        logger.error(f"Error fetching sentiment for {symbol}: {e}")
+            symbol_data = all_data[all_data['symbol'] == symbol].copy()
+            if not symbol_data.empty:
+                # Ensure datetime index
+                if not isinstance(symbol_data.index, pd.DatetimeIndex):
+                    symbol_data = symbol_data.reset_index()
+                    if 'datetime' in symbol_data.columns:
+                        symbol_data = symbol_data.set_index('datetime')
+                    elif 'date' in symbol_data.columns:
+                        symbol_data = symbol_data.set_index('date')
+                
+                # Sort by datetime
+                symbol_data = symbol_data.sort_index()
+                
+                result[symbol] = symbol_data
         
-        return data
-    
-    def _needs_update(self, symbol: str) -> bool:
-        """Check if sentiment data needs updating.
-        
-        Args:
-            symbol: Symbol to check
-            
-        Returns:
-            bool: True if update needed, False otherwise
-        """
-        if symbol not in self.last_update:
-            return True
-        
-        update_interval = self.config.get('update_interval', '1h')
-        if update_interval == '1d':
-            return datetime.now() - self.last_update[symbol] > timedelta(days=1)
-        elif update_interval == '1h':
-            return datetime.now() - self.last_update[symbol] > timedelta(hours=1)
-        else:
-            return True
-    
-    def _fetch_and_analyze(
-        self,
-        symbol: str,
-        start_date: datetime,
-        end_date: datetime
-    ) -> pd.DataFrame:
-        """Fetch and analyze news sentiment for symbol.
-        
-        Args:
-            symbol: Symbol to analyze
-            start_date: Start date
-            end_date: End date
-            
-        Returns:
-            DataFrame with sentiment data
-        """
-        # Fetch news articles (placeholder - implement actual news fetching)
-        articles = self._fetch_news(symbol, start_date, end_date)
-        
-        # Analyze sentiment
-        sentiments = []
-        for article in articles:
-            sentiment = self._analyze_text(article['text'])
-            sentiments.append({
-                'timestamp': article['timestamp'],
-                'title': article['title'],
-                'source': article['source'],
-                'sentiment_score': sentiment['score'],
-                'sentiment_magnitude': sentiment['magnitude'],
-                'url': article['url']
-            })
-        
-        # Create DataFrame
-        df = pd.DataFrame(sentiments)
-        if not df.empty:
-            df.set_index('timestamp', inplace=True)
-            df.sort_index(inplace=True)
-        
-        # Cache the data
-        self.sentiment_cache[symbol] = df
-        self.last_update[symbol] = datetime.now()
-        
-        # Save to disk
-        cache_file = self.cache_dir / f"{symbol}_sentiment.parquet"
-        df.to_parquet(cache_file)
-        
-        return df
-    
-    def _fetch_news(
-        self,
-        symbol: str,
-        start_date: datetime,
-        end_date: datetime
-    ) -> List[Dict]:
-        """Fetch news articles for symbol (placeholder implementation).
-        
-        Args:
-            symbol: Symbol to fetch news for
-            start_date: Start date
-            end_date: End date
-            
-        Returns:
-            List of article dictionaries
-        """
-        # This is a placeholder - implement actual news fetching
-        # For now, return dummy data
-        return [
-            {
-                'timestamp': datetime.now(),
-                'title': f"News about {symbol}",
-                'text': f"This is a sample news article about {symbol}.",
-                'source': 'sample',
-                'url': f"https://example.com/news/{symbol}"
-            }
-        ]
-    
-    def _analyze_text(self, text: str) -> Dict[str, float]:
-        """Analyze sentiment of text.
-        
-        Args:
-            text: Text to analyze
-            
-        Returns:
-            Dict with sentiment score and magnitude
-        """
-        # Use TextBlob for basic sentiment analysis
-        blob = TextBlob(text)
-        
-        # Polarity ranges from -1 (negative) to 1 (positive)
-        # Subjectivity ranges from 0 (objective) to 1 (subjective)
-        return {
-            'score': blob.sentiment.polarity,
-            'magnitude': blob.sentiment.subjectivity
-        }
-    
-    def get_aggregate_sentiment(
-        self,
-        symbol: str,
-        window: str = '1d'
-    ) -> Dict[str, float]:
-        """Get aggregate sentiment metrics for symbol.
-        
-        Args:
-            symbol: Symbol to analyze
-            window: Time window for aggregation
-            
-        Returns:
-            Dict with aggregate sentiment metrics
-        """
-        if symbol not in self.sentiment_cache:
-            return {
-                'mean_sentiment': 0.0,
-                'sentiment_std': 0.0,
-                'sentiment_count': 0
-            }
-        
-        df = self.sentiment_cache[symbol]
-        if df.empty:
-            return {
-                'mean_sentiment': 0.0,
-                'sentiment_std': 0.0,
-                'sentiment_count': 0
-            }
-        
-        # Resample to specified window
-        resampled = df['sentiment_score'].resample(window)
-        
-        return {
-            'mean_sentiment': resampled.mean().iloc[-1],
-            'sentiment_std': resampled.std().iloc[-1],
-            'sentiment_count': len(df)
-        }
+        return result
 
 def get_news_sentiment(
     symbols: Union[str, List[str]],

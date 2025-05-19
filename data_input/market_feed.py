@@ -476,12 +476,22 @@ class MarketFeed:
         # Set multi-index after concatenation
         df = df.set_index(['symbol', 'datetime'])
         
+        # Ensure column names are lowercase
+        df.columns = df.columns.str.lower()
+        
         # Resample data if requested
         if resample_interval is None:
             resample_interval = self.default_interval
         
         if resample_interval != '1d':  # Only resample if not daily
             from .market_utils import resample_market_data
+            # Ensure we have the required columns before resampling
+            required_cols = ['open', 'high', 'low', 'close', 'volume']
+            missing_cols = [col for col in required_cols if col not in df.columns]
+            if missing_cols:
+                raise MarketDataError(f"Missing required columns for resampling: {missing_cols}")
+            
+            # Resample the data
             df = resample_market_data(df, resample_interval)
         
         # Add technical indicators if requested
