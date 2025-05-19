@@ -135,8 +135,8 @@ class TestDataPipelineIntegration:
         pipeline = setup_pipeline
         
         # 1. Get market data - fetch 26 weeks for weekly data
-        # Use UTC and normalize to midnight to avoid timezone issues
-        end_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        # Use yesterday's date to ensure we're working with historical data
+        end_date = (datetime.now() - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
         start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks
         
         # Log the dates for debugging
@@ -173,7 +173,8 @@ class TestDataPipelineIntegration:
         sequence_timestamps = processed_data['sequence_timestamps']
         # Convert all timestamps to pandas Timestamp for consistent comparison
         end_timestamp = pd.Timestamp(end_date)
-        sequence_timestamps = [pd.Timestamp(ts) for ts in sequence_timestamps]
+        # Extract just the timestamp part from the (symbol, timestamp) tuples
+        sequence_timestamps = [pd.Timestamp(ts[1]) for ts in sequence_timestamps]
         
         # Log any problematic timestamps
         problematic_timestamps = [ts for ts in sequence_timestamps if ts >= end_timestamp]
