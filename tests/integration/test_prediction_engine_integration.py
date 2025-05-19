@@ -12,12 +12,18 @@ class TestPredictionEngineIntegration:
     def setup_prediction_components(self, test_config):
         """Setup prediction engine components"""
         preprocessor = SequencePreprocessor(sequence_length=20)
-        feature_engineer = FeatureEngineer(config=test_config)
-        scaler_handler = ScalerHandler(config=test_config)
+        feature_engineer = FeatureEngineer(sequence_length=20, prediction_horizon=1, normalize=True, use_feature_selection=True, n_features=20, use_pca=False, n_components=10, detect_regime=True)
+        scaler_handler = ScalerHandler(model_type='tft', scaler_type='standard')
         predictor = EnhancedStockPredictor(
             sequence_length=20,
-            prediction_horizon=5,
-            device='cpu'
+            prediction_horizon=1,
+            device='cpu',
+            model_type='tft',
+            use_feature_selection=True,
+            use_pca=False,
+            detect_regime=True,
+            ensemble_size=1,
+            memory_efficient=True
         )
         
         return {

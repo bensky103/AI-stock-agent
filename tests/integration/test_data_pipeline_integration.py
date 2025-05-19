@@ -22,7 +22,7 @@ class TestDataPipelineIntegration:
         
         market_manager = MarketFeed(config_path=config_path)
         news_manager = NewsSentimentAnalyzer(config_path=config_path)
-        preprocessor = SequencePreprocessor(config=Path(config_path))
+        preprocessor = SequencePreprocessor(sequence_length=20)
         
         return {
             'market_manager': market_manager,
