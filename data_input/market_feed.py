@@ -546,8 +546,6 @@ class MarketFeed:
                 'Close': 'close',
                 'Volume': 'volume'
             })
-            # Force all columns to lowercase and replace spaces with underscores
-            data.columns = [col.lower().replace(' ', '_') for col in data.columns]
             
             return data
             
