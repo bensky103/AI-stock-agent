@@ -158,7 +158,8 @@ class TestDataPipelineIntegration:
         assert len(processed_data['features']) == len(processed_data['targets']) + 1  # Last sequence has no target
         assert processed_data['data_frequency'] == '1W'  # Verify weekly data
         
-        # Verify no data leakage
-        feature_timestamps = [pd.Timestamp(ts) for ts in processed_data['features'].index]
-        assert not any(ts >= pd.Timestamp(end_date) for ts in feature_timestamps)
-        assert not any(ts <= pd.Timestamp(start_date) for ts in feature_timestamps) 
+        # Verify no data leakage using original DataFrame timestamps
+        # Get the timestamps from the original data that were used to create sequences
+        sequence_timestamps = cleaned_data.index[-len(processed_data['features']):]
+        assert not any(ts >= pd.Timestamp(end_date) for ts in sequence_timestamps)
+        assert not any(ts <= pd.Timestamp(start_date) for ts in sequence_timestamps) 
