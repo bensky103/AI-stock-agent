@@ -160,6 +160,12 @@ class TestDataPipelineIntegration:
         
         # Verify no data leakage using original DataFrame timestamps
         # Get the timestamps from the original data that were used to create sequences
-        sequence_timestamps = cleaned_data.index[-len(processed_data['features']):]
+        if isinstance(cleaned_data.index, pd.MultiIndex):
+            # Get the datetime level (it's either level 0 or 1)
+            datetime_level = cleaned_data.index.names[0] if cleaned_data.index.names[0] == 'datetime' else cleaned_data.index.names[1]
+            sequence_timestamps = cleaned_data.index.get_level_values(datetime_level)[-len(processed_data['features']):]
+        else:
+            sequence_timestamps = cleaned_data.index[-len(processed_data['features']):]
+        
         assert not any(ts >= pd.Timestamp(end_date) for ts in sequence_timestamps)
         assert not any(ts <= pd.Timestamp(start_date) for ts in sequence_timestamps) 
