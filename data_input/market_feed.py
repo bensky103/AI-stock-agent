@@ -352,7 +352,8 @@ class MarketFeed:
         config_path: Optional[Union[str, Path]] = None,
         cache_size: int = 1000,
         max_retries: int = 3,
-        retry_delay: int = 1
+        retry_delay: int = 1,
+        default_interval: str = '1W'  # Changed default to weekly
     ):
         """Initialize the market feed.
         
@@ -361,6 +362,7 @@ class MarketFeed:
             cache_size: Maximum number of cached results
             max_retries: Maximum number of retry attempts
             retry_delay: Delay between retries in seconds
+            default_interval: Default data interval (defaults to weekly)
         """
         self.config = self._load_config(config_path) if config_path else {}
         self.cache_size = cache_size
@@ -369,9 +371,22 @@ class MarketFeed:
         self.data_queue = Queue()
         self.streaming = False
         self.stream_thread = None
+        self.default_interval = default_interval
         
         # Store symbols from config if available
         self.symbols = self.config.get('market_data', {}).get('symbols', [])
+        
+        # Default technical indicator periods for weekly data
+        self.weekly_indicators = {
+            'sma_periods': [4, 13],  # 4 weeks (1 month), 13 weeks (3 months)
+            'ema_periods': [4, 13],
+            'rsi_period': 14,  # Standard RSI period
+            'macd_fast': 12,  # 12 weeks
+            'macd_slow': 26,  # 26 weeks
+            'macd_signal': 9,  # 9 weeks
+            'bollinger_window': 20,  # 20 weeks
+            'bollinger_std': 2
+        }
     
     def _load_config(self, config_path: Union[str, Path]) -> dict:
         """Load and validate market data configuration.
@@ -393,7 +408,8 @@ class MarketFeed:
         start_date: Optional[Union[str, datetime]] = None,
         end_date: Optional[Union[str, datetime]] = None,
         add_indicators: bool = False,
-        indicator_config: Optional[Dict] = None
+        indicator_config: Optional[Dict] = None,
+        resample_interval: Optional[str] = None  # Added resample_interval parameter
     ) -> pd.DataFrame:
         """Fetch market data for symbols.
         
@@ -403,6 +419,7 @@ class MarketFeed:
             end_date: End date for data
             add_indicators: Whether to add technical indicators
             indicator_config: Optional configuration for indicators
+            resample_interval: Optional interval to resample data to (e.g., '1W' for weekly)
             
         Returns:
             DataFrame with market data
@@ -418,7 +435,7 @@ class MarketFeed:
         
         # Set default dates if not provided
         if start_date is None:
-            start_date = datetime.now() - timedelta(days=30)
+            start_date = datetime.now() - timedelta(days=365)  # Increased to 1 year for weekly data
         if end_date is None:
             end_date = datetime.now()
         
@@ -459,11 +476,23 @@ class MarketFeed:
         # Set multi-index after concatenation
         df = df.set_index(['symbol', 'datetime'])
         
+        # Resample data if requested
+        if resample_interval is None:
+            resample_interval = self.default_interval
+        
+        if resample_interval != '1d':  # Only resample if not daily
+            from .market_utils import resample_market_data
+            df = resample_market_data(df, resample_interval)
+        
         # Add technical indicators if requested
         if add_indicators:
             try:
                 if indicator_config is None:
-                    indicator_config = self.config.get('market_data', {}).get('technical_indicators', {})
+                    # Use weekly indicators if data is weekly
+                    if resample_interval == '1W':
+                        indicator_config = self.weekly_indicators
+                    else:
+                        indicator_config = self.config.get('market_data', {}).get('technical_indicators', {})
                 df = add_technical_indicators(df, indicator_config)
             except Exception as e:
                 logger.error(f"Error adding technical indicators: {e}")

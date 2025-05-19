@@ -20,8 +20,8 @@ class TestDecisionMakingIntegration:
             yaml.dump(test_config, f)
             config_path = f.name
         
-        # Initialize components with config path
-        market_feed = MarketFeed(config_path=config_path)
+        # Initialize components with config path and weekly data
+        market_feed = MarketFeed(config_path=config_path, default_interval='1W')
         base_strategy = TradingStrategy(config_path=Path(config_path))
         position_manager = PositionManager(config_path=Path(config_path))
         
@@ -45,18 +45,19 @@ class TestDecisionMakingIntegration:
         """Test the complete strategy decision flow"""
         components = setup_decision_components
         
-        # 1. Get market data - fetch 30 days to ensure enough data
+        # 1. Get market data - fetch 26 weeks for weekly data
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=30)  # Changed from 5 to 30 days
+        start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks
         market_data = components['market_feed'].fetch_data(
             symbols='AAPL',
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
+            resample_interval='1W'  # Explicitly request weekly data
         )
         
         assert isinstance(market_data, pd.DataFrame)
         assert not market_data.empty
-        assert len(market_data) >= 20  # Ensure we have enough data points
+        assert len(market_data) >= 8  # Ensure we have enough weekly data points
         
         # 2. Generate trading signals
         signals = components['strategy'].generate_signals(market_data)
@@ -115,20 +116,21 @@ class TestDecisionMakingIntegration:
         """Test individual strategy components"""
         components = setup_decision_components
         
-        # Get market data - fetch 30 days to ensure enough data
+        # Get market data - fetch 26 weeks for weekly data
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=30)  # Changed from 5 to 30 days
+        start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks
         market_data = components['market_feed'].fetch_data(
             symbols='AAPL',
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
+            resample_interval='1W'  # Explicitly request weekly data
         )
         
         # Test technical analysis
         technical_signals = components['strategy'].calculate_technical_signals(market_data)
         assert isinstance(technical_signals, pd.DataFrame)
         assert not technical_signals.empty
-        assert all(col in technical_signals.columns for col in ['sma_20', 'rsi_14', 'macd'])
+        assert all(col in technical_signals.columns for col in ['sma_4', 'rsi_14', 'macd'])  # Updated for weekly data
         
         # Test signal generation
         signals = components['strategy'].generate_signals(market_data)
@@ -167,13 +169,14 @@ class TestDecisionMakingIntegration:
         """Test data consistency across decision making components"""
         components = setup_decision_components
         
-        # Get market data - fetch 30 days to ensure enough data
+        # Get market data - fetch 26 weeks for weekly data
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=30)  # Changed from 5 to 30 days
+        start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks
         market_data = components['market_feed'].fetch_data(
             symbols='AAPL',
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
+            resample_interval='1W'  # Explicitly request weekly data
         )
         
         # Generate signals

@@ -20,9 +20,9 @@ class TestDataPipelineIntegration:
             yaml.dump(test_config, f)
             config_path = f.name
         
-        market_manager = MarketFeed(config_path=config_path)
+        market_manager = MarketFeed(config_path=config_path, default_interval='1W')  # Set weekly as default
         news_manager = NewsSentimentAnalyzer(config_path=config_path)
-        preprocessor = SequencePreprocessor(sequence_length=20)
+        preprocessor = SequencePreprocessor(sequence_length=8, data_frequency='1W')  # Use weekly data
         
         return {
             'market_manager': market_manager,
@@ -44,18 +44,19 @@ class TestDataPipelineIntegration:
         """Test the complete flow from market data fetching to preprocessing"""
         pipeline = setup_pipeline
         
-        # 1. Fetch market data - fetch 30 days to ensure enough data for sequence length
+        # 1. Fetch market data - fetch 26 weeks to ensure enough weekly data points
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=30)  # Changed from 5 to 30 days
+        start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks for weekly data
         market_data = pipeline['market_manager'].fetch_data(
             symbols='AAPL',
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
+            resample_interval='1W'  # Explicitly request weekly data
         )
         
         assert isinstance(market_data, pd.DataFrame)
         assert not market_data.empty
-        assert len(market_data) >= 20  # Ensure we have enough data points
+        assert len(market_data) >= 8  # Ensure we have enough weekly data points
         
         # 2. Clean the data
         cleaned_data = clean_market_data(market_data)
@@ -68,36 +69,37 @@ class TestDataPipelineIntegration:
         assert isinstance(processed_data, dict)
         assert 'features' in processed_data
         assert 'targets' in processed_data
+        assert processed_data['data_frequency'] == '1W'  # Verify weekly data
     
     def test_news_sentiment_integration(self, setup_pipeline):
         """Test integration between news sentiment and market data"""
         pipeline = setup_pipeline
         
-        # 1. Fetch market data - fetch 30 days to ensure enough data
+        # 1. Fetch market data - fetch 26 weeks for weekly data
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=30)  # Changed from 1 to 30 days
+        start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks
         market_data = pipeline['market_manager'].fetch_data(
+            symbols='AAPL',
+            start_date=start_date,
+            end_date=end_date,
+            resample_interval='1W'  # Explicitly request weekly data
+        )
+        
+        # 2. Fetch news sentiment
+        news_sentiment = pipeline['news_manager'].get_sentiment(
             symbols='AAPL',
             start_date=start_date,
             end_date=end_date
         )
         
-        # 2. Fetch news sentiment
-        news_sentiment = pipeline['news_manager'].get_sentiment_scores(
-            symbol='AAPL',
-            start_date=start_date,
-            end_date=end_date
-        )
+        assert isinstance(news_sentiment, dict)
+        assert 'AAPL' in news_sentiment
+        assert isinstance(news_sentiment['AAPL'], pd.DataFrame)
+        assert not news_sentiment['AAPL'].empty
         
-        assert isinstance(news_sentiment, pd.DataFrame)
-        assert not news_sentiment.empty
-        
-        # 3. Merge market data with sentiment
-        # Note: We need to implement merge_market_sentiment in market_utils
-        # For now, we'll just verify the data separately
-        assert isinstance(market_data, pd.DataFrame)
-        assert isinstance(news_sentiment, pd.DataFrame)
-        assert 'sentiment_score' in news_sentiment.columns
+        # 3. Verify weekly data
+        assert len(market_data) >= 8  # Ensure enough weekly data points
+        assert 'sentiment_score' in news_sentiment['AAPL'].columns
     
     def test_error_handling_integration(self, setup_pipeline):
         """Test error handling across the pipeline"""
@@ -128,13 +130,14 @@ class TestDataPipelineIntegration:
         """Test data consistency across the pipeline"""
         pipeline = setup_pipeline
         
-        # 1. Get market data - fetch 30 days to ensure enough data
+        # 1. Get market data - fetch 26 weeks for weekly data
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=30)  # Changed from 5 to 30 days
+        start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks
         market_data = pipeline['market_manager'].fetch_data(
             symbols='AAPL',
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
+            resample_interval='1W'  # Explicitly request weekly data
         )
         
         # 2. Process through pipeline
@@ -145,6 +148,7 @@ class TestDataPipelineIntegration:
         assert len(processed_data['features']) > 0
         assert len(processed_data['targets']) > 0
         assert len(processed_data['features']) == len(processed_data['targets'])
+        assert processed_data['data_frequency'] == '1W'  # Verify weekly data
         
         # Verify no data leakage
         assert not any(pd.Timestamp(end_date) in processed_data['features'])

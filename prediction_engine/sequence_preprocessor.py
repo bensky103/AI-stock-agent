@@ -27,17 +27,30 @@ class SequencePreprocessor:
     
     Attributes:
         sequence_length (int): Length of input sequences
+        data_frequency (str): Frequency of the data ('1d' for daily, '1W' for weekly)
     """
     
-    def __init__(self, sequence_length: int = 10):
+    def __init__(self, sequence_length: int = 8, data_frequency: str = '1W'):
         """
         Initialize the sequence preprocessor.
         
         Args:
-            sequence_length: Length of input sequences
+            sequence_length: Length of input sequences (defaults to 8 weeks)
+            data_frequency: Frequency of the data ('1d' for daily, '1W' for weekly)
         """
         self.sequence_length = sequence_length
-        logger.info(f"Initialized sequence preprocessor with sequence length {sequence_length}")
+        self.data_frequency = data_frequency
+        
+        # Adjust sequence length based on frequency
+        if data_frequency == '1d':
+            self.sequence_length = max(20, sequence_length)  # At least 20 days for daily data
+        elif data_frequency == '1W':
+            self.sequence_length = max(8, sequence_length)  # At least 8 weeks for weekly data
+        
+        logger.info(
+            f"Initialized sequence preprocessor with sequence length {self.sequence_length} "
+            f"for {data_frequency} data"
+        )
 
     def prepare_sequence(
         self,
@@ -63,10 +76,12 @@ class SequencePreprocessor:
             if df.empty:
                 raise ValueError("Cannot prepare sequences from empty data")
             
-            if len(df) < self.sequence_length:
+            # Check if we have enough data points
+            min_required = self.sequence_length
+            if len(df) < min_required:
                 raise ValueError(
-                    f"Insufficient data: need at least {self.sequence_length} "
-                    f"time steps, got {len(df)}"
+                    f"Insufficient data: need at least {min_required} "
+                    f"{self.data_frequency} time steps, got {len(df)}"
                 )
             
             # Determine feature columns
@@ -99,14 +114,15 @@ class SequencePreprocessor:
             
             logger.info(
                 f"Prepared {len(X)} sequences of length {self.sequence_length} "
-                f"with {len(feature_cols)} features"
+                f"with {len(feature_cols)} features for {self.data_frequency} data"
             )
             
             return {
                 'features': X,
                 'targets': y,
                 'feature_names': feature_cols,
-                'target_name': target_col
+                'target_name': target_col,
+                'data_frequency': self.data_frequency
             }
             
         except Exception as e:

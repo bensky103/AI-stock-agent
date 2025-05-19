@@ -18,7 +18,7 @@ class TestMarketDataIntegration:
             yaml.dump(test_config, f)
             config_path = f.name
         
-        market_manager = MarketFeed(config_path=config_path)
+        market_manager = MarketFeed(config_path=config_path, default_interval='1W')  # Set weekly as default
         enhanced_manager = MarketDataManager(config_path=config_path)
         
         return {
@@ -40,24 +40,26 @@ class TestMarketDataIntegration:
         """Test the complete market data flow"""
         components = setup_market_components
         
-        # 1. Fetch basic market data - fetch 30 days to ensure enough data
+        # 1. Fetch basic market data - fetch 26 weeks for weekly data
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=30)  # Changed from 5 to 30 days
+        start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks
         market_data = components['market_manager'].fetch_data(
             symbols='AAPL',
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
+            resample_interval='1W'  # Explicitly request weekly data
         )
         
         assert isinstance(market_data, pd.DataFrame)
         assert not market_data.empty
-        assert len(market_data) >= 20  # Ensure we have enough data points
+        assert len(market_data) >= 8  # Ensure we have enough weekly data points
         
         # 2. Enhance with additional data
         enhanced_data = components['enhanced_manager'].get_market_data(
             symbols='AAPL',
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
+            interval='1W'  # Use weekly data
         )
         assert isinstance(enhanced_data, pd.DataFrame)
         assert not enhanced_data.empty
@@ -67,32 +69,35 @@ class TestMarketDataIntegration:
         """Test handling of multiple symbols"""
         components = setup_market_components
         
-        # Test fetching data for multiple symbols - fetch 30 days to ensure enough data
+        # Test fetching data for multiple symbols - fetch 26 weeks for weekly data
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=30)  # Changed from 5 to 30 days
+        start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks
         symbols = ['AAPL', 'MSFT', 'GOOGL']
         
         market_data = components['market_manager'].fetch_data(
             symbols=symbols,
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
+            resample_interval='1W'  # Explicitly request weekly data
         )
         
         assert isinstance(market_data, pd.DataFrame)
         assert not market_data.empty
         assert all(symbol in market_data.index.get_level_values('symbol') for symbol in symbols)
+        assert len(market_data) >= 8  # Ensure enough weekly data points for each symbol
     
     def test_market_utils_functions(self, setup_market_components):
         """Test market utility functions"""
         components = setup_market_components
         
-        # Get some market data first - fetch 30 days to ensure enough data
+        # Get some market data first - fetch 26 weeks for weekly data
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=30)  # Changed from 5 to 30 days
+        start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks
         market_data = components['market_manager'].fetch_data(
             symbols='AAPL',
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
+            resample_interval='1W'  # Explicitly request weekly data
         )
         
         # Test data cleaning
@@ -100,6 +105,7 @@ class TestMarketDataIntegration:
         assert isinstance(cleaned_data, pd.DataFrame)
         assert not cleaned_data.empty
         assert cleaned_data.isnull().sum().sum() == 0
+        assert len(cleaned_data) >= 8  # Ensure enough weekly data points
     
     def test_error_handling(self, setup_market_components):
         """Test error handling in market data operations"""
@@ -125,21 +131,23 @@ class TestMarketDataIntegration:
         """Test data consistency across different operations"""
         components = setup_market_components
         
-        # Get data for a specific period - fetch 30 days to ensure enough data
+        # Get data for a specific period - fetch 26 weeks for weekly data
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=30)  # Changed from 5 to 30 days
+        start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks
         
         # Fetch from both managers
         market_data = components['market_manager'].fetch_data(
             symbols='AAPL',
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
+            resample_interval='1W'  # Explicitly request weekly data
         )
         
         enhanced_data = components['enhanced_manager'].get_market_data(
             symbols='AAPL',
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
+            interval='1W'  # Use weekly data
         )
         
         # Verify data consistency
@@ -147,6 +155,8 @@ class TestMarketDataIntegration:
         assert isinstance(enhanced_data, pd.DataFrame)
         assert not market_data.empty
         assert not enhanced_data.empty
+        assert len(market_data) >= 8  # Ensure enough weekly data points
+        assert len(enhanced_data) >= 8  # Ensure enough weekly data points
         
         # Verify date ranges
         market_dates = market_data.index.get_level_values('datetime')
