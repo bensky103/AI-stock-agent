@@ -107,9 +107,6 @@ class YFinanceSource:
         if df.empty:
             raise MarketDataError(f"No data available for {symbol}")
         
-        # Convert column names to lowercase
-        df.columns = df.columns.str.lower()
-        
         # Validate raw data immediately after fetching
         try:
             validate_market_data(
@@ -232,9 +229,6 @@ class MarketDataManager:
                     
                     if df.empty:
                         raise MarketDataError(f"No data available for {symbol}")
-                    
-                    # Convert column names to lowercase
-                    df.columns = df.columns.str.lower()
                     
                     # Validate raw data immediately after fetching
                     try:
@@ -497,6 +491,16 @@ class MarketDataManager:
                 raise MarketDataError(f"Invalid RSI values for {symbol}")
         
         return True
+
+def _safe_lowercase_columns(df):
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = pd.MultiIndex.from_tuples(
+            [(str(level).lower() for level in col) for col in df.columns],
+            names=df.columns.names
+        )
+    else:
+        df.columns = [str(col).lower() for col in df.columns]
+    return df
 
 if __name__ == "__main__":
     # Example usage

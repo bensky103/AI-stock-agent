@@ -414,101 +414,95 @@ class MarketFeed:
         """Fetch market data for symbols.
         
         Args:
-            symbols: Stock symbol(s) to fetch data for
-            start_date: Start date for data
-            end_date: End date for data
+            symbols: Stock symbol(s) to fetch
+            start_date: Start date
+            end_date: End date
             add_indicators: Whether to add technical indicators
-            indicator_config: Optional configuration for indicators
-            resample_interval: Optional interval to resample data to (e.g., '1W' for weekly)
+            indicator_config: Configuration for technical indicators
+            resample_interval: Interval to resample data to
             
         Returns:
             DataFrame with market data
-        """
-        if isinstance(symbols, str):
-            symbols = [symbols]
-        
-        # Convert dates to datetime if strings
-        if isinstance(start_date, str):
-            start_date = datetime.strptime(start_date, '%Y-%m-%d')
-        if isinstance(end_date, str):
-            end_date = datetime.strptime(end_date, '%Y-%m-%d')
-        
-        # Set default dates if not provided
-        if start_date is None:
-            start_date = datetime.now() - timedelta(days=365)  # Increased to 1 year for weekly data
-        if end_date is None:
-            end_date = datetime.now()
-        
-        # Fetch data for each symbol
-        all_data = []
-        for symbol in symbols:
-            try:
-                # Try to fetch data with retries
-                for attempt in range(3):
-                    try:
-                        data = self._fetch_symbol_data(symbol, start_date, end_date)
-                        if data is not None and not data.empty:
-                            # Reset index and rename Date to datetime
-                            data = data.reset_index()
-                            data = data.rename(columns={'Date': 'datetime'})
-                            
-                            # Add symbol column
-                            data['symbol'] = symbol
-                            
-                            # Store data
-                            all_data.append(data)
-                            break
-                    except Exception as e:
-                        if attempt == 2:  # Last attempt
-                            logger.error(f"Failed to fetch data for {symbol} after 3 attempts: {e}")
-                            raise
-                        time.sleep(1)  # Wait before retry
-            except Exception as e:
-                logger.error(f"Error fetching data for {symbol}: {e}")
-                continue
-        
-        if not all_data:
-            raise MarketDataError("No data fetched for any symbols")
-        
-        # Combine all data frames
-        df = pd.concat(all_data, axis=0)
-        
-        # Set multi-index after concatenation
-        df = df.set_index(['symbol', 'datetime'])
-        
-        # Ensure column names are lowercase
-        df.columns = df.columns.str.lower()
-        
-        # Resample data if requested
-        if resample_interval is None:
-            resample_interval = self.default_interval
-        
-        if resample_interval != '1d':  # Only resample if not daily
-            from .market_utils import resample_market_data
-            # Ensure we have the required columns before resampling
-            required_cols = ['open', 'high', 'low', 'close', 'volume']
-            missing_cols = [col for col in required_cols if col not in df.columns]
-            if missing_cols:
-                raise MarketDataError(f"Missing required columns for resampling: {missing_cols}")
             
-            # Resample the data
-            df = resample_market_data(df, resample_interval)
-        
-        # Add technical indicators if requested
-        if add_indicators:
-            try:
-                if indicator_config is None:
-                    # Use weekly indicators if data is weekly
-                    if resample_interval == '1W':
-                        indicator_config = self.weekly_indicators
-                    else:
-                        indicator_config = self.config.get('market_data', {}).get('technical_indicators', {})
-                df = add_technical_indicators(df, indicator_config)
-            except Exception as e:
-                logger.error(f"Error adding technical indicators: {e}")
-                raise
-        
-        return df
+        Raises:
+            MarketDataError: If data fetch fails
+        """
+        try:
+            # Convert symbols to list
+            if isinstance(symbols, str):
+                symbols = [symbols]
+            
+            # Convert dates to datetime
+            if isinstance(start_date, str):
+                start_date = datetime.strptime(start_date, '%Y-%m-%d')
+            if isinstance(end_date, str):
+                end_date = datetime.strptime(end_date, '%Y-%m-%d')
+            
+            # Set default dates if not provided
+            if end_date is None:
+                end_date = datetime.now()
+            if start_date is None:
+                start_date = end_date - timedelta(days=365)
+            
+            # Convert to UTC
+            start_date = self._to_utc(start_date)
+            end_date = self._to_utc(end_date)
+            
+            # Fetch data for each symbol
+            all_data = []
+            for symbol in symbols:
+                data = self._fetch_symbol_data(symbol, start_date, end_date)
+                if data is not None:
+                    # Add symbol column before concatenation
+                    data['symbol'] = symbol
+                    all_data.append(data)
+            
+            if not all_data:
+                raise MarketDataError("No data fetched for any symbols")
+            
+            # Combine all data frames
+            df = pd.concat(all_data, axis=0)
+            
+            # Ensure column names are lowercase before setting multi-index
+            df = _safe_lowercase_columns(df)
+            
+            # Set multi-index after converting column names
+            df = df.set_index(['symbol', 'datetime'])
+            
+            # Resample data if requested
+            if resample_interval is None:
+                resample_interval = self.default_interval
+            
+            if resample_interval != '1d':  # Only resample if not daily
+                from .market_utils import resample_market_data
+                # Ensure we have the required columns before resampling
+                required_cols = ['open', 'high', 'low', 'close', 'volume']
+                missing_cols = [col for col in required_cols if col not in df.columns]
+                if missing_cols:
+                    raise MarketDataError(f"Missing required columns for resampling: {missing_cols}")
+                
+                # Resample the data
+                df = resample_market_data(df, resample_interval)
+            
+            # Add technical indicators if requested
+            if add_indicators:
+                try:
+                    if indicator_config is None:
+                        # Use weekly indicators if data is weekly
+                        if resample_interval == '1W':
+                            indicator_config = self.weekly_indicators
+                        else:
+                            indicator_config = self.config.get('market_data', {}).get('technical_indicators', {})
+                    df = add_technical_indicators(df, indicator_config)
+                except Exception as e:
+                    logger.error(f"Error adding technical indicators: {e}")
+                    raise
+            
+            return df
+
+        except Exception as e:
+            logger.error(f"Error fetching data: {e}")
+            raise MarketDataError(f"Error fetching data: {str(e)}")
 
     def _fetch_symbol_data(
         self,
@@ -641,6 +635,16 @@ class MarketFeed:
         if dt.tzinfo is None:
             dt = pytz.timezone('UTC').localize(dt)
         return dt.astimezone(pytz.UTC)
+
+def _safe_lowercase_columns(df):
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = pd.MultiIndex.from_tuples(
+            [tuple(str(level).lower() for level in col) for col in df.columns],
+            names=df.columns.names
+        )
+    else:
+        df.columns = [str(col).lower() for col in df.columns]
+    return df
 
 def main():
     """Example usage of the MarketFeed class."""
