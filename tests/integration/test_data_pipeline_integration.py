@@ -159,5 +159,6 @@ class TestDataPipelineIntegration:
         assert processed_data['data_frequency'] == '1W'  # Verify weekly data
         
         # Verify no data leakage
-        assert not any(pd.Timestamp(end_date) in processed_data['features'])
-        assert not any(pd.Timestamp(start_date) in processed_data['features']) 
+        feature_timestamps = [pd.Timestamp(ts) for ts in processed_data['features'].index]
+        assert not any(ts >= pd.Timestamp(end_date) for ts in feature_timestamps)
+        assert not any(ts <= pd.Timestamp(start_date) for ts in feature_timestamps) 
