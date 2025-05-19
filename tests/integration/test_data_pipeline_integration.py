@@ -44,27 +44,28 @@ class TestDataPipelineIntegration:
         """Test the complete flow from market data fetching to preprocessing"""
         pipeline = setup_pipeline
         
-        # 1. Fetch market data
+        # 1. Fetch market data - fetch 30 days to ensure enough data for sequence length
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=5)
-        market_data = pipeline['market_manager'].fetch_data(  # Changed from fetch_historical_data to fetch_data
-            symbols='AAPL',  # Changed from symbol to symbols
+        start_date = end_date - timedelta(days=30)  # Changed from 5 to 30 days
+        market_data = pipeline['market_manager'].fetch_data(
+            symbols='AAPL',
             start_date=start_date,
             end_date=end_date
         )
         
         assert isinstance(market_data, pd.DataFrame)
         assert not market_data.empty
+        assert len(market_data) >= 20  # Ensure we have enough data points
         
         # 2. Clean the data
-        cleaned_data = clean_market_data(market_data)  # Using the function directly
+        cleaned_data = clean_market_data(market_data)
         assert isinstance(cleaned_data, pd.DataFrame)
         assert not cleaned_data.empty
         assert cleaned_data.isnull().sum().sum() == 0
         
         # 3. Preprocess for model input
         processed_data = pipeline['preprocessor'].prepare_sequence(cleaned_data)
-        assert isinstance(processed_data, dict)  # Should return a dict of tensors/arrays
+        assert isinstance(processed_data, dict)
         assert 'features' in processed_data
         assert 'targets' in processed_data
     
@@ -72,11 +73,11 @@ class TestDataPipelineIntegration:
         """Test integration between news sentiment and market data"""
         pipeline = setup_pipeline
         
-        # 1. Fetch market data
+        # 1. Fetch market data - fetch 30 days to ensure enough data
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=1)
-        market_data = pipeline['market_manager'].fetch_data(  # Changed from fetch_historical_data to fetch_data
-            symbols='AAPL',  # Changed from symbol to symbols
+        start_date = end_date - timedelta(days=30)  # Changed from 1 to 30 days
+        market_data = pipeline['market_manager'].fetch_data(
+            symbols='AAPL',
             start_date=start_date,
             end_date=end_date
         )
@@ -127,17 +128,17 @@ class TestDataPipelineIntegration:
         """Test data consistency across the pipeline"""
         pipeline = setup_pipeline
         
-        # 1. Get market data
+        # 1. Get market data - fetch 30 days to ensure enough data
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=5)
-        market_data = pipeline['market_manager'].fetch_data(  # Changed from fetch_historical_data to fetch_data
-            symbols='AAPL',  # Changed from symbol to symbols
+        start_date = end_date - timedelta(days=30)  # Changed from 5 to 30 days
+        market_data = pipeline['market_manager'].fetch_data(
+            symbols='AAPL',
             start_date=start_date,
             end_date=end_date
         )
         
         # 2. Process through pipeline
-        cleaned_data = clean_market_data(market_data)  # Using the function directly
+        cleaned_data = clean_market_data(market_data)
         processed_data = pipeline['preprocessor'].prepare_sequence(cleaned_data)
         
         # Verify data consistency

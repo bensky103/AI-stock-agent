@@ -45,9 +45,9 @@ class TestDecisionMakingIntegration:
         """Test the complete strategy decision flow"""
         components = setup_decision_components
         
-        # 1. Get market data
+        # 1. Get market data - fetch 30 days to ensure enough data
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=5)
+        start_date = end_date - timedelta(days=30)  # Changed from 5 to 30 days
         market_data = components['market_feed'].fetch_data(
             symbols='AAPL',
             start_date=start_date,
@@ -56,6 +56,7 @@ class TestDecisionMakingIntegration:
         
         assert isinstance(market_data, pd.DataFrame)
         assert not market_data.empty
+        assert len(market_data) >= 20  # Ensure we have enough data points
         
         # 2. Generate trading signals
         signals = components['strategy'].generate_signals(market_data)
@@ -114,9 +115,9 @@ class TestDecisionMakingIntegration:
         """Test individual strategy components"""
         components = setup_decision_components
         
-        # Get market data
+        # Get market data - fetch 30 days to ensure enough data
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=5)
+        start_date = end_date - timedelta(days=30)  # Changed from 5 to 30 days
         market_data = components['market_feed'].fetch_data(
             symbols='AAPL',
             start_date=start_date,
@@ -166,9 +167,9 @@ class TestDecisionMakingIntegration:
         """Test data consistency across decision making components"""
         components = setup_decision_components
         
-        # Get market data
+        # Get market data - fetch 30 days to ensure enough data
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=5)
+        start_date = end_date - timedelta(days=30)  # Changed from 5 to 30 days
         market_data = components['market_feed'].fetch_data(
             symbols='AAPL',
             start_date=start_date,

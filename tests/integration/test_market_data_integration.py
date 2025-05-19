@@ -40,9 +40,9 @@ class TestMarketDataIntegration:
         """Test the complete market data flow"""
         components = setup_market_components
         
-        # 1. Fetch basic market data
+        # 1. Fetch basic market data - fetch 30 days to ensure enough data
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=5)
+        start_date = end_date - timedelta(days=30)  # Changed from 5 to 30 days
         market_data = components['market_manager'].fetch_data(
             symbols='AAPL',
             start_date=start_date,
@@ -51,6 +51,7 @@ class TestMarketDataIntegration:
         
         assert isinstance(market_data, pd.DataFrame)
         assert not market_data.empty
+        assert len(market_data) >= 20  # Ensure we have enough data points
         
         # 2. Enhance with additional data
         enhanced_data = components['enhanced_manager'].get_market_data(
@@ -66,9 +67,9 @@ class TestMarketDataIntegration:
         """Test handling of multiple symbols"""
         components = setup_market_components
         
-        # Test fetching data for multiple symbols
+        # Test fetching data for multiple symbols - fetch 30 days to ensure enough data
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=5)
+        start_date = end_date - timedelta(days=30)  # Changed from 5 to 30 days
         symbols = ['AAPL', 'MSFT', 'GOOGL']
         
         market_data = components['market_manager'].fetch_data(
@@ -85,9 +86,9 @@ class TestMarketDataIntegration:
         """Test market utility functions"""
         components = setup_market_components
         
-        # Get some market data first
+        # Get some market data first - fetch 30 days to ensure enough data
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=5)
+        start_date = end_date - timedelta(days=30)  # Changed from 5 to 30 days
         market_data = components['market_manager'].fetch_data(
             symbols='AAPL',
             start_date=start_date,
@@ -124,9 +125,9 @@ class TestMarketDataIntegration:
         """Test data consistency across different operations"""
         components = setup_market_components
         
-        # Get data for a specific period
+        # Get data for a specific period - fetch 30 days to ensure enough data
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=5)
+        start_date = end_date - timedelta(days=30)  # Changed from 5 to 30 days
         
         # Fetch from both managers
         market_data = components['market_manager'].fetch_data(
