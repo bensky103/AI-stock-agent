@@ -481,6 +481,11 @@ class MarketFeed:
                 from .market_utils import resample_market_data
                 # Ensure we have the required columns before resampling
                 required_cols = ['open', 'high', 'low', 'close', 'volume']
+                
+                # Check if we have multi-index columns and flatten if needed
+                if isinstance(df.columns, pd.MultiIndex):
+                    df.columns = [col[0] for col in df.columns]
+                
                 missing_cols = [col for col in required_cols if col not in df.columns]
                 if missing_cols:
                     raise MarketDataError(f"Missing required columns for resampling: {missing_cols}")
