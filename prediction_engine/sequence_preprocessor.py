@@ -77,7 +77,7 @@ class SequencePreprocessor:
                 raise ValueError("Cannot prepare sequences from empty data")
             
             # Check if we have enough data points
-            min_required = self.sequence_length
+            min_required = self.sequence_length + 1  # +1 for target
             if len(df) < min_required:
                 raise ValueError(
                     f"Insufficient data: need at least {min_required} "
@@ -98,15 +98,15 @@ class SequencePreprocessor:
             sequences = []
             targets = []
             
-            for i in range(len(df) - self.sequence_length + 1):
+            # Stop one step before the end to prevent data leakage
+            for i in range(len(df) - self.sequence_length):
                 # Extract sequence
                 sequence = df[feature_cols].iloc[i:i + self.sequence_length].values
                 sequences.append(sequence)
                 
                 # Extract target (next value after sequence)
-                if i + self.sequence_length < len(df):
-                    target = df[target_col].iloc[i + self.sequence_length]
-                    targets.append(target)
+                target = df[target_col].iloc[i + self.sequence_length]
+                targets.append(target)
             
             # Convert to numpy arrays
             X = np.array(sequences)
