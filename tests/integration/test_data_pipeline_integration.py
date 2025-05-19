@@ -155,7 +155,7 @@ class TestDataPipelineIntegration:
         # Verify data consistency
         assert len(processed_data['features']) > 0
         assert len(processed_data['targets']) > 0
-        assert len(processed_data['features']) == len(processed_data['targets'])
+        assert len(processed_data['features']) == len(processed_data['targets']) + 1  # Last sequence has no target
         assert processed_data['data_frequency'] == '1W'  # Verify weekly data
         
         # Verify no data leakage

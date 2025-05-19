@@ -156,9 +156,9 @@ def clean_market_data(
     
     # Handle missing values
     if fill_method == 'ffill':
-        df = df.fillna(method='ffill', limit=max_gap)
+        df = df.ffill(limit=max_gap)
     elif fill_method == 'bfill':
-        df = df.fillna(method='bfill', limit=max_gap)
+        df = df.bfill(limit=max_gap)
     elif fill_method == 'interpolate':
         df = df.interpolate(method='linear', limit=max_gap)
     
@@ -240,7 +240,7 @@ def resample_market_data(
             # Forward fill missing values for OHLC
             ohlc_cols = [col for col in resampled.columns if col in ['open', 'high', 'low', 'close']]
             if ohlc_cols:
-                resampled[ohlc_cols] = resampled[ohlc_cols].fillna(method='ffill')
+                resampled[ohlc_cols] = resampled[ohlc_cols].ffill()
             
             # Fill remaining missing values with 0 for volume
             if 'volume' in resampled.columns:
@@ -280,7 +280,7 @@ def resample_market_data(
         # Forward fill missing values for OHLC
         ohlc_cols = [col for col in resampled.columns if col in ['open', 'high', 'low', 'close']]
         if ohlc_cols:
-            resampled[ohlc_cols] = resampled[ohlc_cols].fillna(method='ffill')
+            resampled[ohlc_cols] = resampled[ohlc_cols].ffill()
         
         # Fill remaining missing values with 0 for volume
         if 'volume' in resampled.columns:
