@@ -67,7 +67,7 @@ class SequencePreprocessor:
             feature_cols: List of feature columns to use (defaults to all columns except target)
             
         Returns:
-            Dictionary containing prepared sequences
+            Dictionary containing prepared sequences and their timestamps
             
         Raises:
             ValueError: If data is insufficient or invalid
@@ -97,6 +97,7 @@ class SequencePreprocessor:
             # Create sequences
             sequences = []
             targets = []
+            sequence_timestamps = []  # Track timestamps for each sequence
             
             # Create sequences with targets (excluding the last sequence)
             # Stop two steps before the end to leave room for the last sequence
@@ -104,6 +105,9 @@ class SequencePreprocessor:
                 # Extract sequence
                 sequence = df[feature_cols].iloc[i:i + self.sequence_length].values
                 sequences.append(sequence)
+                
+                # Store the last timestamp of this sequence
+                sequence_timestamps.append(df.index[i + self.sequence_length - 1])
                 
                 # Extract target (next value after sequence)
                 target = df[target_col].iloc[i + self.sequence_length]
@@ -113,6 +117,9 @@ class SequencePreprocessor:
             # Take the sequence ending one step before the end date
             last_sequence = df[feature_cols].iloc[-(self.sequence_length + 1):-1].values
             sequences.append(last_sequence)
+            
+            # Store the last timestamp of the final sequence
+            sequence_timestamps.append(df.index[-2])  # -2 because we excluded the last date
             
             # Convert to numpy arrays
             X = np.array(sequences)
@@ -128,7 +135,8 @@ class SequencePreprocessor:
                 'targets': y,
                 'feature_names': feature_cols,
                 'target_name': target_col,
-                'data_frequency': self.data_frequency
+                'data_frequency': self.data_frequency,
+                'sequence_timestamps': sequence_timestamps  # Include timestamps in return value
             }
             
         except Exception as e:
