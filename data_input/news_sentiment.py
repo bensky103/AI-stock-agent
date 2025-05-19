@@ -22,6 +22,7 @@ import praw
 import os
 import pytz
 import yfinance as yf
+from .market_feed import load_config
 
 # Ensure logs directory exists
 os.makedirs('logs', exist_ok=True)

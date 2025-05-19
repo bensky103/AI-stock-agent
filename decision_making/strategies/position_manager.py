@@ -2,11 +2,12 @@
 
 import numpy as np
 import pandas as pd
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Union
 import logging
 from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import datetime
+import uuid
 
 from .base_strategy import PositionType, Position
 
@@ -315,4 +316,189 @@ class PositionManager:
                 'take_profit': position.take_profit
             }
             for symbol, position in self.positions.items()
-        } 
+        }
+    
+    def open_position(
+        self,
+        symbol: str,
+        entry_price: float,
+        size: float,
+        position_type: Union[str, PositionType]
+    ) -> Position:
+        """
+        Open a new trading position.
+        
+        Parameters
+        ----------
+        symbol : str
+            Trading symbol
+        entry_price : float
+            Entry price
+        size : float
+            Position size in shares
+        position_type : Union[str, PositionType]
+            Type of position ('long'/'short' or PositionType)
+            
+        Returns
+        -------
+        Position
+            Created position object
+            
+        Raises
+        ------
+        ValueError
+            If parameters are invalid
+        """
+        try:
+            # Validate parameters
+            if entry_price <= 0:
+                raise ValueError("Entry price must be positive")
+            if size <= 0:
+                raise ValueError("Position size must be positive")
+            
+            # Convert string position type to enum
+            if isinstance(position_type, str):
+                position_type = PositionType.LONG if position_type.lower() == 'long' else PositionType.SHORT
+            
+            # Create position
+            position = Position(
+                symbol=symbol,
+                type=position_type,
+                entry_price=entry_price,
+                size=size,
+                entry_time=pd.Timestamp.now(),
+                stop_loss=self._calculate_levels(position_type, entry_price, entry_price)[0],
+                take_profit=self._calculate_levels(position_type, entry_price, entry_price)[1]
+            )
+            
+            # Store position
+            self.positions[symbol] = position
+            
+            logger.info(f"Opened {position_type.name} position for {symbol}: {position}")
+            return position
+            
+        except Exception as e:
+            logger.error(f"Error opening position: {str(e)}")
+            raise
+    
+    def close_position(
+        self,
+        position_id: str,
+        exit_price: float
+    ) -> Position:
+        """
+        Close an existing position.
+        
+        Parameters
+        ----------
+        position_id : str
+            Position identifier (symbol)
+        exit_price : float
+            Exit price
+            
+        Returns
+        -------
+        Position
+            Closed position object
+            
+        Raises
+        ------
+        ValueError
+            If position doesn't exist or parameters are invalid
+        """
+        try:
+            if position_id not in self.positions:
+                raise ValueError(f"Position {position_id} not found")
+            if exit_price <= 0:
+                raise ValueError("Exit price must be positive")
+            
+            position = self.positions[position_id]
+            position.exit_price = exit_price
+            position.exit_time = pd.Timestamp.now()
+            position.is_closed = True
+            
+            # Calculate final P&L
+            position.pnl = self.calculate_pnl(position_id, exit_price)
+            
+            # Remove from active positions
+            del self.positions[position_id]
+            
+            logger.info(f"Closed position for {position_id}: {position}")
+            return position
+            
+        except Exception as e:
+            logger.error(f"Error closing position: {str(e)}")
+            raise
+    
+    def execute_trade(
+        self,
+        symbol: str,
+        signal: int,
+        price: float,
+        timestamp: datetime
+    ) -> Optional[Position]:
+        """
+        Execute a trade based on signal.
+        
+        Parameters
+        ----------
+        symbol : str
+            Trading symbol
+        signal : int
+            Trading signal (-1 for short, 0 for neutral, 1 for long)
+        price : float
+            Current price
+        timestamp : datetime
+            Current timestamp
+            
+        Returns
+        -------
+        Optional[Position]
+            Created position if trade executed, None otherwise
+        """
+        try:
+            # Convert signal to position type
+            if signal == 0:
+                return None
+            
+            position_type = PositionType.LONG if signal > 0 else PositionType.SHORT
+            
+            # Check if we already have a position
+            if symbol in self.positions:
+                current_position = self.positions[symbol]
+                
+                # If signal is opposite to current position, close it
+                if current_position.type != position_type:
+                    self.close_position(symbol, price)
+                else:
+                    # Update existing position
+                    self.update_position(
+                        symbol=symbol,
+                        position_type=position_type,
+                        entry_price=current_position.entry_price,
+                        size=current_position.size,
+                        current_price=price,
+                        timestamp=timestamp
+                    )
+                    return current_position
+            
+            # Calculate position size (simplified for base implementation)
+            size = self.calculate_position_size(
+                symbol=symbol,
+                price=price,
+                signal_strength=abs(signal),
+                volatility=0.1,  # Placeholder
+                market_regime=0.5  # Placeholder
+            )
+            
+            # Open new position
+            return self.open_position(
+                symbol=symbol,
+                entry_price=price,
+                size=size,
+                position_type=position_type
+            )
+            
+        except Exception as e:
+            logger.error(f"Error executing trade: {str(e)}")
+            return None 
