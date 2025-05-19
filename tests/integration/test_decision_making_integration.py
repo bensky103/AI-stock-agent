@@ -4,8 +4,8 @@ import pytest
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from trading.strategies import TradingStrategy
-from trading.position_manager import PositionManager
+from decision_making.strategies.base_strategy import TradingStrategy
+from decision_making.strategies.position_manager import PositionManager
 from data_input.market_feed import MarketFeed
 
 class TestDecisionMakingIntegration:
