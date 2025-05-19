@@ -4,7 +4,7 @@ import pytest
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from decision_making.strategies.base_strategy import TradingStrategy
+from decision_making.strategies.base_strategy import TradingStrategy, PositionType
 from decision_making.strategies.position_manager import PositionManager
 from data_input.market_feed import MarketFeed
 from pathlib import Path
@@ -93,7 +93,7 @@ class TestDecisionMakingIntegration:
         assert position.symbol == 'AAPL'
         assert position.entry_price == 150.0
         assert position.size == 100
-        assert position.position_type == 'long'
+        assert position.type == PositionType.LONG
         
         # 2. Update position
         updated_position = components['position_manager'].update_position(
@@ -200,7 +200,7 @@ class TestDecisionMakingIntegration:
             assert position.symbol == 'AAPL'
             assert position.entry_price > 0
             assert position.size > 0
-            assert position.position_type in ['long', 'short']
+            assert position.type in [PositionType.LONG, PositionType.SHORT]
             
             # Verify position updates
             updated_position = components['position_manager'].get_position(position.id)
