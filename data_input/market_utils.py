@@ -248,15 +248,25 @@ def resample_market_data(
             
             # Add symbol back
             resampled[symbol_level] = symbol
-            resampled = resampled.reset_index()
-            resampled = resampled.set_index([symbol_level, datetime_level])
+            resampled = resampled.set_index(symbol_level, append=True)
+            
+            # Reorder index levels to match input
+            if df.index.names[0] == 'symbol':
+                resampled = resampled.reorder_levels([symbol_level, datetime_level])
+            else:
+                resampled = resampled.reorder_levels([datetime_level, symbol_level])
             
             resampled_dfs.append(resampled)
         
         # Combine all resampled DataFrames
-        return pd.concat(resampled_dfs, axis=0)
+        result = pd.concat(resampled_dfs)
+        
+        # Sort index
+        result = result.sort_index()
+        
+        return result
     else:
-        # Handle single-index DataFrame (original behavior)
+        # Single index case
         if not isinstance(df.index, pd.DatetimeIndex):
             df = df.reset_index()
             if 'datetime' in df.columns:

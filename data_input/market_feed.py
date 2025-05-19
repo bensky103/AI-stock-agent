@@ -409,7 +409,7 @@ class MarketFeed:
         end_date: Optional[Union[str, datetime]] = None,
         add_indicators: bool = False,
         indicator_config: Optional[Dict] = None,
-        resample_interval: Optional[str] = None  # Added resample_interval parameter
+        resample_interval: Optional[str] = None
     ) -> pd.DataFrame:
         """Fetch market data for symbols.
         
