@@ -21,9 +21,7 @@ class TestPredictionEngineIntegration:
             model_type='tft',
             use_feature_selection=True,
             use_pca=False,
-            detect_regime=True,
-            ensemble_size=1,
-            memory_efficient=True
+            detect_regime=True
         )
         
         return {
