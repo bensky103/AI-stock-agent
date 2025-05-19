@@ -65,7 +65,11 @@ class TestDataPipelineIntegration:
         assert cleaned_data.isnull().sum().sum() == 0
         
         # 3. Preprocess for model input
-        processed_data = pipeline['preprocessor'].prepare_sequence(cleaned_data)
+        processed_data = pipeline['preprocessor'].prepare_sequence(
+            cleaned_data,
+            target_col='close',  # Use 'close' as the target column
+            feature_cols=['open', 'high', 'low', 'volume']  # Exclude 'close' from features
+        )
         assert isinstance(processed_data, dict)
         assert 'features' in processed_data
         assert 'targets' in processed_data
@@ -142,7 +146,11 @@ class TestDataPipelineIntegration:
         
         # 2. Process through pipeline
         cleaned_data = clean_market_data(market_data)
-        processed_data = pipeline['preprocessor'].prepare_sequence(cleaned_data)
+        processed_data = pipeline['preprocessor'].prepare_sequence(
+            cleaned_data,
+            target_col='close',  # Use 'close' as the target column
+            feature_cols=['open', 'high', 'low', 'volume']  # Exclude 'close' from features
+        )
         
         # Verify data consistency
         assert len(processed_data['features']) > 0
