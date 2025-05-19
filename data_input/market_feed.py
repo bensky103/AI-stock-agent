@@ -462,7 +462,11 @@ class MarketFeed:
             
             # Combine all data frames
             df = pd.concat(all_data, axis=0)
-            
+
+            # Ensure datetime is a column (yfinance returns it as index)
+            if 'datetime' not in df.columns:
+                df = df.reset_index().rename(columns={df.index.name or 'index': 'datetime'})
+
             # Ensure column names are lowercase before setting multi-index
             df = _safe_lowercase_columns(df)
             
