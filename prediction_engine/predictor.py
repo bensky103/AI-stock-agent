@@ -80,9 +80,9 @@ class EnhancedStockPredictor:
         self.prediction_horizon = prediction_horizon
         self.device = device
         self.model_type = model_type
-        self.models = {}  # Dictionary to store models for each symbol
-        self.feature_engineer = None
+        self.model = None  # Will be initialized when loading a model
         self.saved_models_dir = Path("saved_models")
+        self.saved_models_dir.mkdir(exist_ok=True)
         
         # Initialize components
         self.feature_engineer = FeatureEngineer(
@@ -94,22 +94,6 @@ class EnhancedStockPredictor:
         )
         self.sequence_preprocessor = SequencePreprocessor(sequence_length)
         self.scaler_handler = ScalerHandler(model_type='tft')
-        self.predictor = TFTPredictor(
-            sequence_length=sequence_length,
-            prediction_horizon=prediction_horizon,
-            device=device
-        )
-        
-        # Initialize feature engineer with settings from saved models
-        self.feature_engineer = FeatureEngineer(
-            sequence_length=sequence_length,
-            n_technical_indicators=20,
-            use_feature_selection=True,
-            use_pca=True,
-            n_features=20,
-            n_pca_components=10,
-            use_regime_detection=True
-        )
         
         # Load global training config
         config_path = self.saved_models_dir / "training_config.json"
@@ -126,43 +110,27 @@ class EnhancedStockPredictor:
             f"sequence length {sequence_length}, prediction horizon {prediction_horizon}"
         )
     
-    def load_model(self, symbol: str) -> None:
-        """Load model for a specific symbol from saved_models directory."""
+    def load_model(self, model_path: Optional[Path] = None) -> None:
+        """Load a trained model from disk."""
         try:
-            # Construct paths for this symbol
-            model_path = self.saved_models_dir / f"{symbol}_model.pth"
-            config_path = self.saved_models_dir / f"{symbol}_model.json"
+            if model_path is None:
+                model_path = self.saved_models_dir / "tft_model"
+            config_path = model_path.parent / "tft_config.yaml"
             
-            if not model_path.exists() or not config_path.exists():
-                raise FileNotFoundError(f"No saved model found for symbol {symbol}")
+            if not model_path.exists():
+                raise FileNotFoundError(f"Model path does not exist: {model_path}")
+            if not config_path.exists():
+                raise FileNotFoundError(f"Config path does not exist: {config_path}")
             
-            # Load model configuration
-            with open(config_path, 'r') as f:
-                config = json.load(f)
-            
-            # Create TFT model with saved configuration
-            model = TFTPredictor(
-                sequence_length=config['sequence_length'],
-                prediction_horizon=config['prediction_horizon'],
-                hidden_size=config['hidden_size'],
-                num_heads=config['num_heads'],
-                num_layers=config['num_layers'],
-                dropout=config['dropout'],
-                device=self.device
+            self.model = TFTPredictor(
+                model_path=str(model_path),
+                config_path=str(config_path)
             )
+            self.logger.info(f"Model loaded successfully from {model_path}")
             
-            # Load weights
-            model.load_state_dict(torch.load(model_path, map_location=self.device))
-            model.to(self.device)
-            model.eval()
-            
-            # Store model for this symbol
-            self.models[symbol] = model
-            logger.info(f"Loaded model for {symbol} from {model_path}")
-        
         except Exception as e:
-            logger.error(f"Error loading model for {symbol}: {str(e)}")
-            raise
+            self.logger.error(f"Error loading model: {str(e)}")
+            raise StockPredictorError(f"Failed to load model: {str(e)}")
     
     def predict(
         self,
@@ -307,17 +275,18 @@ class EnhancedStockPredictor:
                     continue
                 
                 # Create model
-                input_size = features.shape[-1]
-                model = TFTPredictor(
-                    sequence_length=self.sequence_length,
-                    prediction_horizon=self.prediction_horizon,
-                    hidden_size=64,  # Default values for testing
-                    num_heads=8,
-                    num_layers=2,
-                    dropout=0.2,
-                    device=self.device
-                )
-                model.to(self.device)
+                # input_size = features.shape[-1]
+                # model = TFTPredictor(
+                #     sequence_length=self.sequence_length,
+                #     prediction_horizon=self.prediction_horizon,
+                #     hidden_size=64,  # Default values for testing
+                #     num_heads=8,
+                #     num_layers=2,
+                #     dropout=0.2,
+                #     device=self.device
+                # )
+                # model.to(self.device)
+                raise NotImplementedError("Training TFT models is not supported in this method. Please use the dedicated TFT training pipeline.")
                 
                 # Prepare data loaders
                 train_size = int(0.8 * len(features))

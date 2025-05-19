@@ -6,14 +6,49 @@ from prediction_engine.sequence_preprocessor import SequencePreprocessor
 from prediction_engine.feature_engineering import FeatureEngineer
 from prediction_engine.scaler_handler import ScalerHandler
 from prediction_engine.predictor import EnhancedStockPredictor
+from pathlib import Path
+import yaml
+from prediction_engine.exceptions import StockPredictorError
 
 class TestPredictionEngineIntegration:
     @pytest.fixture
     def setup_prediction_components(self, test_config):
-        """Setup prediction engine components"""
-        preprocessor = SequencePreprocessor(sequence_length=20)
-        feature_engineer = FeatureEngineer(sequence_length=20, prediction_horizon=1, normalize=True, use_feature_selection=True, n_features=20, use_pca=False, n_components=10, detect_regime=True)
-        scaler_handler = ScalerHandler(model_type='tft', scaler_type='standard')
+        """Set up prediction engine components for testing."""
+        # Create necessary directories and files
+        saved_models_dir = Path("saved_models")
+        saved_models_dir.mkdir(exist_ok=True)
+        
+        # Create dummy model and config files
+        model_path = saved_models_dir / "tft_model"
+        model_path.mkdir(exist_ok=True)
+        config_path = saved_models_dir / "tft_config.yaml"
+        with open(config_path, 'w') as f:
+            yaml.dump({
+                'sequence_length': 20,
+                'prediction_horizon': 1,
+                'hidden_size': 64,
+                'num_heads': 4,
+                'num_layers': 2,
+                'dropout': 0.1
+            }, f)
+        
+        # Initialize components with correct arguments
+        feature_engineer = FeatureEngineer(
+            sequence_length=20,
+            prediction_horizon=1,
+            normalize=True,
+            use_feature_selection=True,
+            n_features=20,
+            use_pca=False,
+            n_components=10,
+            detect_regime=True
+        )
+        
+        scaler_handler = ScalerHandler(
+            model_type='tft',
+            scaler_type='standard'
+        )
+        
         predictor = EnhancedStockPredictor(
             sequence_length=20,
             prediction_horizon=1,
@@ -25,10 +60,11 @@ class TestPredictionEngineIntegration:
         )
         
         return {
-            'preprocessor': preprocessor,
             'feature_engineer': feature_engineer,
             'scaler_handler': scaler_handler,
-            'predictor': predictor
+            'predictor': predictor,
+            'model_path': model_path,
+            'config_path': config_path
         }
     
     @pytest.fixture
@@ -189,4 +225,17 @@ class TestPredictionEngineIntegration:
             scaled_features, scaler
         )
         assert original_features.shape == features.shape
-        assert np.allclose(original_features, features, rtol=1e-5) 
+        assert np.allclose(original_features, features, rtol=1e-5)
+    
+    def test_model_loading(self, setup_prediction_components):
+        """Test model loading functionality."""
+        components = setup_prediction_components
+        predictor = components['predictor']
+        
+        # Test loading model
+        predictor.load_model(components['model_path'])
+        assert predictor.model is not None
+        
+        # Test loading with invalid path
+        with pytest.raises(StockPredictorError):
+            predictor.load_model(Path("invalid_path")) 
