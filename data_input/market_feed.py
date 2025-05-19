@@ -423,7 +423,7 @@ class MarketFeed:
             end_date = datetime.now()
         
         # Fetch data for each symbol
-        all_data = {}
+        all_data = []
         for symbol in symbols:
             try:
                 # Try to fetch data with retries
@@ -435,12 +435,11 @@ class MarketFeed:
                             data = data.reset_index()
                             data = data.rename(columns={'Date': 'datetime'})
                             
-                            # Add symbol column and set multi-index
+                            # Add symbol column
                             data['symbol'] = symbol
-                            data = data.set_index(['symbol', 'datetime'])
                             
-                            # Store data with proper column structure
-                            all_data[symbol] = data
+                            # Store data
+                            all_data.append(data)
                             break
                     except Exception as e:
                         if attempt == 2:  # Last attempt
@@ -454,17 +453,11 @@ class MarketFeed:
         if not all_data:
             raise MarketDataError("No data fetched for any symbols")
         
-        # Combine data for all symbols
-        # First, ensure all DataFrames have the same column structure
-        base_columns = ['open', 'high', 'low', 'close', 'adj_close', 'volume']
-        for symbol, df in all_data.items():
-            # Ensure all required columns exist
-            for col in base_columns:
-                if col not in df.columns:
-                    raise MarketDataError(f"Missing required column {col} for {symbol}")
+        # Combine all data frames
+        df = pd.concat(all_data, axis=0)
         
-        # Combine the DataFrames
-        df = pd.concat(all_data.values(), axis=1)
+        # Set multi-index after concatenation
+        df = df.set_index(['symbol', 'datetime'])
         
         # Add technical indicators if requested
         if add_indicators:
@@ -507,7 +500,7 @@ class MarketFeed:
                 logger.warning(f"No data found for {symbol}")
                 return None
             
-            # Standardize column names to match get_market_data
+            # Standardize column names
             data = data.rename(columns={
                 'Adj Close': 'adj_close',
                 'Open': 'open',
@@ -516,9 +509,6 @@ class MarketFeed:
                 'Close': 'close',
                 'Volume': 'volume'
             })
-            
-            # Add symbol level to columns
-            data.columns = pd.MultiIndex.from_product([data.columns, [symbol]])
             
             return data
             
