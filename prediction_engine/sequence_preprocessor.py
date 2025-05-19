@@ -99,7 +99,8 @@ class SequencePreprocessor:
             targets = []
             
             # Create sequences with targets (excluding the last sequence)
-            for i in range(len(df) - self.sequence_length - 1):
+            # Stop two steps before the end to leave room for the last sequence
+            for i in range(len(df) - self.sequence_length - 2):
                 # Extract sequence
                 sequence = df[feature_cols].iloc[i:i + self.sequence_length].values
                 sequences.append(sequence)
@@ -109,7 +110,8 @@ class SequencePreprocessor:
                 targets.append(target)
             
             # Add the last sequence without a target (for prediction)
-            last_sequence = df[feature_cols].iloc[-self.sequence_length:].values
+            # Take the sequence ending one step before the end date
+            last_sequence = df[feature_cols].iloc[-(self.sequence_length + 1):-1].values
             sequences.append(last_sequence)
             
             # Convert to numpy arrays
