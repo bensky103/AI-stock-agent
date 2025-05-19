@@ -19,7 +19,7 @@ def main():
     
     # 3. Get sentiment data
     sentiment_data = get_sentiment_data(config)
-    
+
     # 4. Prepare features and sequences for TFT model
     feature_engineer = FeatureEngineer(
         sequence_length=config['model']['sequence_length'],

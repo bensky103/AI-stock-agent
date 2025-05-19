@@ -11,7 +11,7 @@ class TestPredictionEngineIntegration:
     @pytest.fixture
     def setup_prediction_components(self, test_config):
         """Setup prediction engine components"""
-        preprocessor = SequencePreprocessor(config=test_config)
+        preprocessor = SequencePreprocessor(sequence_length=20)
         feature_engineer = FeatureEngineer(config=test_config)
         scaler_handler = ScalerHandler(config=test_config)
         predictor = EnhancedStockPredictor(

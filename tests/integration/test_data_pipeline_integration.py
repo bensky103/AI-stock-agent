@@ -7,6 +7,7 @@ from data_input.market_feed import MarketFeed
 from data_input.news_sentiment import NewsSentimentAnalyzer
 from prediction_engine.sequence_preprocessor import SequencePreprocessor
 from data_input.market_utils import clean_market_data
+from pathlib import Path
 
 class TestDataPipelineIntegration:
     @pytest.fixture
@@ -20,8 +21,8 @@ class TestDataPipelineIntegration:
             config_path = f.name
         
         market_manager = MarketFeed(config_path=config_path)
-        news_manager = NewsSentimentAnalyzer(config=test_config)
-        preprocessor = SequencePreprocessor(config=test_config)
+        news_manager = NewsSentimentAnalyzer(config_path=config_path)
+        preprocessor = SequencePreprocessor(config=Path(config_path))
         
         return {
             'market_manager': market_manager,

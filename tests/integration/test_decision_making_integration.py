@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from decision_making.strategies.base_strategy import TradingStrategy
 from decision_making.strategies.position_manager import PositionManager
 from data_input.market_feed import MarketFeed
+from pathlib import Path
 
 class TestDecisionMakingIntegration:
     @pytest.fixture
@@ -21,8 +22,8 @@ class TestDecisionMakingIntegration:
         
         # Initialize components with config path
         market_feed = MarketFeed(config_path=config_path)
-        base_strategy = TradingStrategy(config_path=config_path)
-        position_manager = PositionManager(config_path=config_path)
+        base_strategy = TradingStrategy(config_path=Path(config_path))
+        position_manager = PositionManager(config_path=Path(config_path))
         
         return {
             'market_feed': market_feed,

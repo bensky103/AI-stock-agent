@@ -38,7 +38,7 @@ class SequencePreprocessor:
         """
         self.sequence_length = sequence_length
         logger.info(f"Initialized sequence preprocessor with sequence length {sequence_length}")
-    
+
     def prepare_sequence(
         self,
         df: pd.DataFrame,
@@ -134,7 +134,7 @@ class SequencePreprocessor:
                     f"Missing required keys in sequence dictionary. "
                     f"Expected {required_keys}, got {list(sequence.keys())}"
                 )
-            
+        
             # Check shapes
             features = sequence['features']
             targets = sequence['targets']
