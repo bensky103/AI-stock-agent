@@ -483,6 +483,17 @@ class MarketFeed:
             # Set multi-index after converting column names
             df = df.set_index(['symbol', 'datetime'])
             
+            # Add symbol level to columns for each symbol
+            symbols = df.index.get_level_values('symbol').unique()
+            for symbol in symbols:
+                symbol_data = df.xs(symbol, level='symbol')
+                symbol_data.columns = pd.MultiIndex.from_product([symbol_data.columns, [symbol]])
+                if symbol == symbols[0]:
+                    result_df = symbol_data
+                else:
+                    result_df = pd.concat([result_df, symbol_data], axis=1)
+            df = result_df
+            
             # Resample data if requested
             if resample_interval is None:
                 resample_interval = self.default_interval
