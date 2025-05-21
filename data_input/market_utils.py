@@ -218,13 +218,13 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
         # Create resampler on the datetime index
         resampler = symbol_data.resample(interval)
         
-        # Apply aggregations
-        resampled = pd.DataFrame({
-            'open': resampler['open'].first(),
-            'high': resampler['high'].max(),
-            'low': resampler['low'].min(),
-            'close': resampler['close'].last(),
-            'volume': resampler['volume'].sum()
+        # Apply aggregations using pandas' built-in methods
+        resampled = resampler.agg({
+            'open': lambda x: x.iloc[0],  # First value
+            'high': 'max',
+            'low': 'min',
+            'close': lambda x: x.iloc[-1],  # Last value
+            'volume': 'sum'
         })
         
         # Filter out data points beyond the original end date
