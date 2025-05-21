@@ -527,9 +527,26 @@ class MarketFeed:
                         else:
                             indicator_config = self.config.get('market_data', {}).get('technical_indicators', {})
                     
-                    # Convert to MultiIndex columns if needed
-                    if not isinstance(df.columns, pd.MultiIndex):
-                        df.columns = pd.MultiIndex.from_product([df.columns, ['']])
+                    # Ensure we have all required columns for each symbol
+                    required_cols = ['open', 'high', 'low', 'close', 'volume']
+                    missing_cols = []
+                    
+                    for symbol in df.index.get_level_values('symbol').unique():
+                        for col in required_cols:
+                            if (col, symbol) not in df.columns:
+                                missing_cols.append(f"{col} for {symbol}")
+                    
+                    if missing_cols:
+                        raise MarketDataError(f"Missing required columns for technical indicators: {missing_cols}")
+                    
+                    # Verify data integrity before adding indicators
+                    for symbol in df.index.get_level_values('symbol').unique():
+                        symbol_data = df.xs(symbol, level='symbol')
+                        if symbol_data.empty:
+                            raise MarketDataError(f"No data available for {symbol}")
+                        for col in required_cols:
+                            if symbol_data[(col, symbol)].isna().all():
+                                raise MarketDataError(f"All values are NaN for {col} in {symbol}")
                     
                     df = add_technical_indicators(df, indicator_config)
                 except Exception as e:
