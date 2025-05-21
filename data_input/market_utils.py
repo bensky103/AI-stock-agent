@@ -208,25 +208,23 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
     symbol_level = df.index.names[0] if df.index.names[0] == 'symbol' else df.index.names[1]
     datetime_level = df.index.names[1] if df.index.names[0] == 'symbol' else df.index.names[0]
     
-    # Define aggregation rules for each column
-    agg_dict = {
-        'open': 'first',
-        'high': 'max',
-        'low': 'min',
-        'close': 'last',
-        'volume': 'sum',
-        'dividends': 'sum',
-        'stock splits': 'sum'
-    }
-    
     # Process each symbol separately
     resampled_dfs = []
     for symbol in df.index.get_level_values(symbol_level).unique():
         # Get data for this symbol
         symbol_data = df.xs(symbol, level=symbol_level)
         
-        # Resample the data
-        resampled = symbol_data.resample(interval).agg(agg_dict)
+        # Create resampler
+        resampler = symbol_data.resample(interval)
+        
+        # Apply aggregations
+        resampled = pd.DataFrame({
+            'open': resampler['open'].first(),
+            'high': resampler['high'].max(),
+            'low': resampler['low'].min(),
+            'close': resampler['close'].last(),
+            'volume': resampler['volume'].sum()
+        })
         
         # Add symbol back
         resampled[symbol_level] = symbol

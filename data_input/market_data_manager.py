@@ -109,8 +109,12 @@ class YFinanceSource:
             if df.empty:
                 raise MarketDataError(f"No data available for {symbol}")
             
+            # Log original columns
+            logger.info(f"Original columns from yfinance: {df.columns.tolist()}")
+            
             # Convert column names to lowercase for consistent handling
             df.columns = df.columns.str.lower()
+            logger.info(f"Columns after lowercase conversion: {df.columns.tolist()}")
             
             # Map required columns (case-insensitive)
             required_cols = {
@@ -126,6 +130,7 @@ class YFinanceSource:
             for req_col, possible_names in required_cols.items():
                 if not any(name in df.columns for name in possible_names):
                     missing_cols.append(req_col)
+                    logger.error(f"Missing column {req_col}. Available columns: {df.columns.tolist()}")
             
             if missing_cols:
                 raise MarketDataError(f"Missing required columns from yfinance: {missing_cols}")
@@ -135,6 +140,7 @@ class YFinanceSource:
                 col: req_col for req_col, possible_names in required_cols.items()
                 for col in possible_names if col in df.columns
             })
+            logger.info(f"Final columns after renaming: {df.columns.tolist()}")
             
             # Validate raw data immediately after fetching
             try:
