@@ -242,8 +242,7 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
             resampled['symbol'] = symbol
             
             # Set multi-index with datetime and symbol
-            resampled = resampled.set_index(['index', 'symbol'])
-            resampled.index.names = ['datetime', 'symbol']  # Rename index levels
+            resampled = resampled.set_index(['datetime', 'symbol'])
             
             # Filter out data points beyond original end date
             resampled = resampled[resampled.index.get_level_values('datetime') <= original_end_date]
