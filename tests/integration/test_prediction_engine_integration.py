@@ -10,6 +10,13 @@ from pathlib import Path
 import yaml
 from prediction_engine.exceptions import StockPredictorError
 import json
+import sys
+import os
+
+# Add colab_training to Python path
+colab_training_path = str(Path(__file__).parent.parent.parent / "colab_training")
+if colab_training_path not in sys.path:
+    sys.path.append(colab_training_path)
 
 class TestPredictionEngineIntegration:
     @pytest.fixture
