@@ -2,12 +2,13 @@
 
 import logging
 from typing import Dict, List, Tuple, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 import yaml
 import pandas as pd
 import numpy as np
+import uuid
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ class Position:
     entry_price: float
     entry_time: pd.Timestamp
     size: float
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
     trailing_stop: Optional[float] = None
