@@ -286,13 +286,17 @@ def test_market_feed_integration(mock_ticker, sample_config, sample_market_data)
     aapl_data.columns = [col.lower() for col in aapl_data.columns]
     msft_data.columns = [col.lower() for col in msft_data.columns]
     
+    # Ensure the index is named 'Date' for both datasets
+    aapl_data.index.name = 'Date'
+    msft_data.index.name = 'Date'
+    
     # Mock Ticker.history to return different data for each symbol
     def mock_history_side_effect(*args, **kwargs):
         symbol = mock_ticker.call_args[0][0]  # Get the symbol from Ticker constructor
         if symbol == 'AAPL':
-            return aapl_data
+            return aapl_data.copy()  # Return a copy to prevent modification
         elif symbol == 'MSFT':
-            return msft_data
+            return msft_data.copy()  # Return a copy to prevent modification
         return pd.DataFrame()
     
     mock_ticker_instance = MagicMock()
