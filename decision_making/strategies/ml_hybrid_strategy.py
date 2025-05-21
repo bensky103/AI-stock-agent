@@ -187,4 +187,54 @@ class MLHybridStrategy(TradingStrategy):
             
         except Exception as e:
             logger.error(f"Error combining signals: {str(e)}")
-            return 0.0 
+            return 0.0
+
+    def calculate_technical_signals(self, data: pd.DataFrame) -> pd.DataFrame:
+        """
+        Calculate technical indicators and signals.
+        
+        Parameters
+        ----------
+        data : pd.DataFrame
+            Market data
+            
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame with technical indicators
+        """
+        if not self.validate_data(data):
+            # Calculate required indicators before validation
+            signals = pd.DataFrame(index=data.index)
+            
+            # Calculate RSI
+            delta = data['close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            signals['RSI'] = 100 - (100 / (1 + rs))
+            
+            # Calculate MACD
+            exp1 = data['close'].ewm(span=12, adjust=False).mean()
+            exp2 = data['close'].ewm(span=26, adjust=False).mean()
+            signals['MACD'] = exp1 - exp2
+            signals['MACD_Signal'] = signals['MACD'].ewm(span=9, adjust=False).mean()
+            
+            # Calculate moving averages
+            signals['SMA_20'] = data['close'].rolling(window=20).mean()
+            signals['SMA_50'] = data['close'].rolling(window=50).mean()
+            
+            # Calculate volume moving average
+            signals['Volume_MA'] = data['volume'].rolling(window=20).mean()
+            
+            # Calculate market regime (simplified version using volatility)
+            returns = data['close'].pct_change()
+            signals['Market_Regime'] = returns.rolling(window=20).std()
+            
+            # Add original data columns
+            for col in data.columns:
+                signals[col] = data[col]
+            
+            return signals
+        
+        return data  # Return data if it already has required indicators 

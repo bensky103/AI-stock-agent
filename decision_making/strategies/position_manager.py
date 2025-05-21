@@ -358,7 +358,13 @@ class PositionManager:
             
             # Convert string position type to enum
             if isinstance(position_type, str):
-                position_type = PositionType.LONG if position_type.lower() == 'long' else PositionType.SHORT
+                try:
+                    position_type = PositionType.LONG if position_type.lower() == 'long' else PositionType.SHORT
+                except (AttributeError, ValueError):
+                    raise ValueError(f"Invalid position type: {position_type}. Must be 'long' or 'short'")
+            
+            if not isinstance(position_type, PositionType):
+                raise ValueError(f"Invalid position type: {position_type}. Must be PositionType enum")
             
             # Create position
             position = Position(
