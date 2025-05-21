@@ -208,6 +208,9 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
     symbol_level = df.index.names[0] if df.index.names[0] == 'symbol' else df.index.names[1]
     datetime_level = df.index.names[1] if df.index.names[0] == 'symbol' else df.index.names[0]
     
+    # Get the original end date from the input data
+    original_end_date = df.index.get_level_values(datetime_level).max()
+    
     # Process each symbol separately
     resampled_dfs = []
     for symbol in df.index.get_level_values(symbol_level).unique():
@@ -215,7 +218,7 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
         symbol_data = df.xs(symbol, level=symbol_level)
         
         # Create resampler
-        resampler = symbol_data.resample(interval)
+        resampler = symbol_data.resample(interval, level=datetime_level)
         
         # Apply aggregations
         resampled = pd.DataFrame({
@@ -225,6 +228,9 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
             'close': resampler['close'].last(),
             'volume': resampler['volume'].sum()
         })
+        
+        # Filter out data points beyond the original end date
+        resampled = resampled[resampled.index <= original_end_date]
         
         # Add symbol back
         resampled[symbol_level] = symbol
