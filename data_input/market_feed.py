@@ -462,11 +462,11 @@ class MarketFeed:
             
             # Combine all data frames
             df = pd.concat(all_data, axis=0)
-
+            
             # Ensure datetime is a column (yfinance returns it as index)
             if 'datetime' not in df.columns:
                 df = df.reset_index().rename(columns={df.index.name or 'index': 'datetime'})
-
+            
             # Ensure column names are lowercase before setting multi-index
             df = _safe_lowercase_columns(df)
             
@@ -490,8 +490,35 @@ class MarketFeed:
                 if missing_cols:
                     raise MarketDataError(f"Missing required columns for resampling: {missing_cols}")
                 
-                # Resample the data
-                df = resample_market_data(df, resample_interval)
+                try:
+                    # Resample the data
+                    df = resample_market_data(df, resample_interval)
+                except Exception as e:
+                    logger.error(f"Error during resampling: {str(e)}")
+                    # If resampling fails, try to resample each symbol separately
+                    resampled_dfs = []
+                    for symbol in df.index.get_level_values('symbol').unique():
+                        symbol_data = df.xs(symbol, level='symbol')
+                        try:
+                            resampled = symbol_data.resample(resample_interval).agg({
+                                'open': 'first',
+                                'high': 'max',
+                                'low': 'min',
+                                'close': 'last',
+                                'volume': 'sum'
+                            })
+                            resampled['symbol'] = symbol
+                            resampled = resampled.set_index('symbol', append=True)
+                            resampled_dfs.append(resampled)
+                        except Exception as e:
+                            logger.error(f"Error resampling {symbol}: {str(e)}")
+                            continue
+                    
+                    if not resampled_dfs:
+                        raise MarketDataError("Failed to resample any symbols")
+                    
+                    df = pd.concat(resampled_dfs)
+                    df = df.sort_index()
             
             # Add technical indicators if requested
             if add_indicators:
@@ -508,7 +535,7 @@ class MarketFeed:
                     raise
             
             return df
-
+            
         except Exception as e:
             logger.error(f"Error fetching data: {e}")
             raise MarketDataError(f"Error fetching data: {str(e)}")

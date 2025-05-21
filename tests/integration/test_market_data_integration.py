@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from data_input.market_feed import MarketFeed
 from data_input.market_data_manager import MarketDataManager
 from data_input import market_utils
+import pytz
 
 class TestMarketDataIntegration:
     @pytest.fixture
@@ -132,7 +133,7 @@ class TestMarketDataIntegration:
         components = setup_market_components
         
         # Get data for a specific period - fetch 26 weeks for weekly data
-        end_date = datetime.now()
+        end_date = datetime.now(pytz.UTC)  # Make end_date timezone-aware
         start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks
         
         # Fetch from both managers
@@ -158,9 +159,9 @@ class TestMarketDataIntegration:
         assert len(market_data) >= 8  # Ensure enough weekly data points
         assert len(enhanced_data) >= 8  # Ensure enough weekly data points
         
-        # Verify date ranges
-        market_dates = market_data.index.get_level_values('datetime')
-        enhanced_dates = enhanced_data.index.get_level_values('datetime')
+        # Convert dates to UTC for comparison
+        market_dates = market_data.index.get_level_values('datetime').tz_localize(pytz.UTC)
+        enhanced_dates = enhanced_data.index.get_level_values('datetime').tz_localize(pytz.UTC)
         
         assert market_dates.min() >= start_date
         assert market_dates.max() <= end_date
