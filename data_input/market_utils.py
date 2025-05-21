@@ -1,10 +1,11 @@
 """Utility functions for market data processing and validation."""
 
-import pandas as pd
-import numpy as np
 import logging
+import numpy as np
+import pandas as pd
 from typing import List, Optional, Union
 from datetime import datetime, timedelta
+import pytz
 
 logger = logging.getLogger(__name__)
 
@@ -222,13 +223,13 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
             # Create resampler
             resampler = symbol_data.resample(interval)
             
-            # Use agg() with a dictionary of aggregation functions
+            # Use agg() with lambda functions for aggregation
             resampled = resampler.agg({
-                'open': 'first',
-                'high': 'max',
-                'low': 'min',
-                'close': 'last',
-                'volume': 'sum'
+                'open': lambda x: x.iloc[0] if not x.empty else np.nan,
+                'high': lambda x: x.max() if not x.empty else np.nan,
+                'low': lambda x: x.min() if not x.empty else np.nan,
+                'close': lambda x: x.iloc[-1] if not x.empty else np.nan,
+                'volume': lambda x: x.sum() if not x.empty else np.nan
             })
             
             # Add symbol column and set multi-index
