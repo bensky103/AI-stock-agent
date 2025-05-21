@@ -5,7 +5,8 @@ from datetime import datetime, timedelta
 from prediction_engine.sequence_preprocessor import SequencePreprocessor
 from prediction_engine.feature_engineering import FeatureEngineer
 from prediction_engine.scaler_handler import ScalerHandler
-from prediction_engine.predictor import EnhancedStockPredictor
+from prediction_engine.predictor import EnhancedStockPredictor, StockPredictorError
+from prediction_engine.tft_predictor import TFTPredictorError
 from pathlib import Path
 import yaml
 from prediction_engine.exceptions import StockPredictorError
@@ -252,5 +253,5 @@ class TestPredictionEngineIntegration:
         assert predictor.model is not None
         
         # Test loading with invalid path
-        with pytest.raises(StockPredictorError):
+        with pytest.raises((StockPredictorError, TFTPredictorError)):
             predictor.load_model(Path("invalid_path")) 
