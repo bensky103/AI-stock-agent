@@ -216,6 +216,10 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
     logger.debug(f"Input DataFrame columns: {df.columns.tolist()}")
     logger.debug(f"Input DataFrame first few rows:\n{df.head()}")
     
+    # Handle duplicate columns by keeping only the first occurrence
+    df = df.loc[:, ~df.columns.duplicated()]
+    logger.debug(f"Columns after removing duplicates: {df.columns.tolist()}")
+    
     # Get original end date for filtering
     original_end_date = pd.Timestamp(df.index.get_level_values('datetime').max())
     logger.debug(f"Original end date: {original_end_date}")
