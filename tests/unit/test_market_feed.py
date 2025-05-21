@@ -282,31 +282,11 @@ def test_market_feed_integration(mock_ticker, sample_config, sample_market_data)
     aapl_data = sample_market_data.copy()
     msft_data = sample_market_data.copy()
     
-    # Convert column names to match yfinance.Ticker.history() output exactly
-    column_mapping = {
-        'Open': 'Open',
-        'High': 'High',
-        'Low': 'Low',
-        'Close': 'Close',
-        'Adj Close': 'Adj Close',
-        'Volume': 'Volume'
-    }
-    
     # Ensure both datasets have the exact same structure as yfinance output
     for df in [aapl_data, msft_data]:
         # First ensure we have the exact column names from yfinance
-        df.columns = [column_mapping.get(col, col) for col in df.columns]
+        df.columns = ['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']
         df.index.name = 'Date'
-        
-        # Then transform the data to match what _fetch_symbol_data returns
-        df = df.rename(columns={
-            'Adj Close': 'adj_close',
-            'Open': 'open',
-            'High': 'high',
-            'Low': 'low',
-            'Close': 'close',
-            'Volume': 'volume'
-        })
     
     # Mock Ticker.history to return different data for each symbol
     def mock_history_side_effect(*args, **kwargs):
@@ -332,14 +312,29 @@ def test_market_feed_integration(mock_ticker, sample_config, sample_market_data)
         add_indicators=True
     )
     
+    # Verify the data structure and content
     assert isinstance(df, pd.DataFrame)
     assert not df.empty
+    
+    # Check index structure
     assert ('AAPL', pd.Timestamp('2024-01-02')) in df.index
     assert ('MSFT', pd.Timestamp('2024-01-02')) in df.index
+    
+    # Check basic columns
     assert ('close', 'AAPL') in df.columns
     assert ('close', 'MSFT') in df.columns
+    
+    # Check technical indicators
     assert ('sma_20', 'AAPL') in df.columns
     assert ('sma_20', 'MSFT') in df.columns
     assert ('rsi', 'AAPL') in df.columns
     assert ('rsi', 'MSFT') in df.columns
+    
+    # Verify data integrity
+    for symbol in ['AAPL', 'MSFT']:
+        symbol_data = df.xs(symbol, level='symbol')
+        assert not symbol_data.empty
+        assert not symbol_data[('close', symbol)].isna().all()
+        assert not symbol_data[('sma_20', symbol)].isna().all()
+        assert not symbol_data[('rsi', symbol)].isna().all()
 
