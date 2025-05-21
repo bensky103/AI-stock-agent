@@ -232,15 +232,15 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
             for col in ['open', 'high', 'low', 'close', 'volume']:
                 # Get the resampled series for this column
                 if col == 'open':
-                    resampled[col] = resampler[col].first()
+                    resampled[col] = resampler[col].first().iloc[:, 0] if isinstance(resampler[col].first(), pd.DataFrame) else resampler[col].first()
                 elif col == 'high':
-                    resampled[col] = resampler[col].max()
+                    resampled[col] = resampler[col].max().iloc[:, 0] if isinstance(resampler[col].max(), pd.DataFrame) else resampler[col].max()
                 elif col == 'low':
-                    resampled[col] = resampler[col].min()
+                    resampled[col] = resampler[col].min().iloc[:, 0] if isinstance(resampler[col].min(), pd.DataFrame) else resampler[col].min()
                 elif col == 'close':
-                    resampled[col] = resampler[col].last()
+                    resampled[col] = resampler[col].last().iloc[:, 0] if isinstance(resampler[col].last(), pd.DataFrame) else resampler[col].last()
                 elif col == 'volume':
-                    resampled[col] = resampler[col].sum()
+                    resampled[col] = resampler[col].sum().iloc[:, 0] if isinstance(resampler[col].sum(), pd.DataFrame) else resampler[col].sum()
             
             # Add symbol column
             resampled['symbol'] = symbol
