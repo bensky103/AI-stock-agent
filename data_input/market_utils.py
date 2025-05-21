@@ -190,103 +190,33 @@ def clean_market_data(
     
     return df
 
-def resample_market_data(
-    df: pd.DataFrame,
-    interval: str,
-    agg_dict: Optional[dict] = None
-) -> pd.DataFrame:
-    """Resample market data to a different time interval.
+def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
+    """Resample market data to a different interval.
     
     Args:
-        df: DataFrame to resample (can be multi-indexed with symbol and datetime)
-        interval: Target interval (e.g., '1H', '1D', '1W')
-        agg_dict: Dictionary specifying aggregation methods for each column
+        df: DataFrame with market data
+        interval: Target interval (e.g., '1W' for weekly)
         
     Returns:
-        Resampled DataFrame with the same index structure as input
+        Resampled DataFrame
     """
-    if agg_dict is None:
-        agg_dict = {
-            'open': 'first',
-            'high': 'max',
-            'low': 'min',
-            'close': 'last',
-            'volume': 'sum'
-        }
+    # Define aggregation rules for each column
+    agg_dict = {
+        'open': 'first',
+        'high': 'max',
+        'low': 'min',
+        'close': 'last',
+        'volume': 'sum',
+        'dividends': 'sum',
+        'stock splits': 'sum'
+    }
     
-    # Check if we have a multi-index DataFrame
-    if isinstance(df.index, pd.MultiIndex):
-        # Get the symbol level name
-        symbol_level = df.index.names[0] if df.index.names[0] == 'symbol' else df.index.names[1]
-        datetime_level = df.index.names[1] if df.index.names[0] == 'symbol' else df.index.names[0]
-        
-        # Process each symbol separately
-        resampled_dfs = []
-        for symbol in df.index.get_level_values(symbol_level).unique():
-            # Get data for this symbol
-            symbol_data = df.xs(symbol, level=symbol_level)
-            
-            # Ensure datetime index
-            if not isinstance(symbol_data.index, pd.DatetimeIndex):
-                symbol_data = symbol_data.reset_index()
-                if 'datetime' in symbol_data.columns:
-                    symbol_data = symbol_data.set_index('datetime')
-                elif 'date' in symbol_data.columns:
-                    symbol_data = symbol_data.set_index('date')
-            
-            # Resample data
-            resampled = symbol_data.resample(interval).agg(agg_dict)
-            
-            # Forward fill missing values for OHLC
-            ohlc_cols = [col for col in resampled.columns if col in ['open', 'high', 'low', 'close']]
-            if ohlc_cols:
-                resampled[ohlc_cols] = resampled[ohlc_cols].ffill()
-            
-            # Fill remaining missing values with 0 for volume
-            if 'volume' in resampled.columns:
-                resampled['volume'] = resampled['volume'].fillna(0)
-            
-            # Add symbol back
-            resampled[symbol_level] = symbol
-            resampled = resampled.set_index(symbol_level, append=True)
-            
-            # Reorder index levels to match input
-            if df.index.names[0] == 'symbol':
-                resampled = resampled.reorder_levels([symbol_level, datetime_level])
-            else:
-                resampled = resampled.reorder_levels([datetime_level, symbol_level])
-            
-            resampled_dfs.append(resampled)
-        
-        # Combine all resampled DataFrames
-        result = pd.concat(resampled_dfs)
-        
-        # Sort index
-        result = result.sort_index()
-        
-        return result
-    else:
-        # Single index case
-        if not isinstance(df.index, pd.DatetimeIndex):
-            df = df.reset_index()
-            if 'datetime' in df.columns:
-                df = df.set_index('datetime')
-            elif 'date' in df.columns:
-                df = df.set_index('date')
-        
-        # Resample data
-        resampled = df.resample(interval).agg(agg_dict)
-        
-        # Forward fill missing values for OHLC
-        ohlc_cols = [col for col in resampled.columns if col in ['open', 'high', 'low', 'close']]
-        if ohlc_cols:
-            resampled[ohlc_cols] = resampled[ohlc_cols].ffill()
-        
-        # Fill remaining missing values with 0 for volume
-        if 'volume' in resampled.columns:
-            resampled['volume'] = resampled['volume'].fillna(0)
-        
-        return resampled
+    # Group by symbol and resample
+    resampled = df.groupby(level=0).apply(
+        lambda x: x.droplevel(0).resample(interval).agg(agg_dict)
+    )
+    
+    return resampled
 
 def calculate_returns(
     df: pd.DataFrame,

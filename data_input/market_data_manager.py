@@ -107,6 +107,9 @@ class YFinanceSource:
         if df.empty:
             raise MarketDataError(f"No data available for {symbol}")
         
+        # Convert column names to lowercase
+        df.columns = df.columns.str.lower()
+        
         # Validate raw data immediately after fetching
         try:
             validate_market_data(
