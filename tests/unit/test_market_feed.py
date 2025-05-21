@@ -282,13 +282,20 @@ def test_market_feed_integration(mock_ticker, sample_config, sample_market_data)
     aapl_data = sample_market_data.copy()
     msft_data = sample_market_data.copy()
     
-    # Convert column names to lowercase for both datasets
-    aapl_data.columns = [col.lower() for col in aapl_data.columns]
-    msft_data.columns = [col.lower() for col in msft_data.columns]
+    # Convert column names to match yfinance.Ticker.history() output exactly
+    column_mapping = {
+        'Open': 'Open',
+        'High': 'High',
+        'Low': 'Low',
+        'Close': 'Close',
+        'Adj Close': 'Adj Close',
+        'Volume': 'Volume'
+    }
     
-    # Ensure the index is named 'Date' for both datasets
-    aapl_data.index.name = 'Date'
-    msft_data.index.name = 'Date'
+    # Ensure both datasets have the exact same structure as yfinance output
+    for df in [aapl_data, msft_data]:
+        df.columns = [column_mapping.get(col, col) for col in df.columns]
+        df.index.name = 'Date'
     
     # Mock Ticker.history to return different data for each symbol
     def mock_history_side_effect(*args, **kwargs):
