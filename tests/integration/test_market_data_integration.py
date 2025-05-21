@@ -137,9 +137,9 @@ class TestMarketDataIntegration:
         """Test data consistency across different operations"""
         components = setup_market_components
         
-        # Get data for a specific period - fetch 26 weeks for weekly data
-        end_date = datetime.now(pytz.UTC) - timedelta(days=1)  # Use UTC and subtract one day
-        start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks
+        # Set end date to one day before today (2025-05-20)
+        end_date = datetime(2025, 5, 20, tzinfo=pytz.UTC)
+        start_date = end_date - timedelta(weeks=26)  # 26 weeks before end date
         
         logger.debug(f"Fetching data from {start_date} to {end_date}")
 
