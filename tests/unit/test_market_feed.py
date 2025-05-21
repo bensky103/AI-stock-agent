@@ -249,10 +249,13 @@ def test_market_feed_initialization(sample_config):
     assert 'market_data' in feed.config
     assert feed.symbols == ['AAPL', 'MSFT', 'GOOGL']
 
-@patch('yfinance.download')
-def test_market_feed_fetch_data(mock_download, sample_config, sample_market_data):
+@patch('yfinance.Ticker')
+def test_market_feed_fetch_data(mock_ticker, sample_config, sample_market_data):
     """Test MarketFeed data fetching."""
-    mock_download.return_value = sample_market_data
+    # Set up the mock
+    mock_ticker_instance = MagicMock()
+    mock_ticker_instance.history.return_value = sample_market_data
+    mock_ticker.return_value = mock_ticker_instance
     
     feed = MarketFeed(config_path=sample_config)
     df = feed.fetch_data(
@@ -263,7 +266,7 @@ def test_market_feed_fetch_data(mock_download, sample_config, sample_market_data
     
     assert isinstance(df, pd.DataFrame)
     assert ('AAPL', pd.Timestamp('2024-01-02')) in df.index
-    mock_download.assert_called_once()
+    mock_ticker_instance.history.assert_called_once()
 
 def test_market_feed_data_validation(sample_config, sample_market_data):
     """Test MarketFeed data validation."""
@@ -272,22 +275,25 @@ def test_market_feed_data_validation(sample_config, sample_market_data):
         validate_market_data(sample_market_data)
 
 # Integration tests
-@patch('yfinance.download')
-def test_market_feed_integration(mock_download, sample_config, sample_market_data):
+@patch('yfinance.Ticker')
+def test_market_feed_integration(mock_ticker, sample_config, sample_market_data):
     """Test market feed integration with multiple symbols and indicators."""
     # Create separate data for each symbol
     aapl_data = sample_market_data.copy()
     msft_data = sample_market_data.copy()
     
-    # Mock download to return different data for each symbol
-    def mock_download_side_effect(symbol, *args, **kwargs):
+    # Mock Ticker.history to return different data for each symbol
+    def mock_history_side_effect(*args, **kwargs):
+        symbol = mock_ticker.call_args[0][0]  # Get the symbol from Ticker constructor
         if symbol == 'AAPL':
             return aapl_data
         elif symbol == 'MSFT':
             return msft_data
         return pd.DataFrame()
     
-    mock_download.side_effect = mock_download_side_effect
+    mock_ticker_instance = MagicMock()
+    mock_ticker_instance.history.side_effect = mock_history_side_effect
+    mock_ticker.return_value = mock_ticker_instance
     
     feed = MarketFeed(config_path=sample_config)
     
