@@ -147,7 +147,7 @@ class TestDecisionMakingIntegration:
         components = setup_decision_components
         
         # Test invalid market data
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError, match="Invalid data format"):
             components['strategy'].generate_signals(pd.DataFrame())
         
         # Test invalid position parameters
@@ -160,12 +160,12 @@ class TestDecisionMakingIntegration:
             )
         
         # Test invalid position type
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Invalid position type"):
             components['position_manager'].open_position(
                 symbol='AAPL',
                 entry_price=150.0,
                 size=100,
-                position_type='invalid_type'  # Invalid position type
+                position_type='invalid_type'  # Clearly invalid type
             )
     
     def test_data_consistency(self, setup_decision_components):
