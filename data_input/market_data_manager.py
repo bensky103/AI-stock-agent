@@ -309,22 +309,14 @@ class MarketDataManager:
                         self.data_cache[cache_key] = df
                         self.last_update[symbol] = datetime.now()
                 
-                # Add symbol column and set multi-index
-                df['symbol'] = symbol
-                df = df.reset_index()
-                df = df.rename(columns={'Date': 'datetime'})
-                # Ensure datetime column is properly named and set as index
-                df = df.set_index(['symbol', 'datetime'])
-                df.index.names = ['symbol', 'datetime']  # Explicitly set index names
-                
-                # Resample data if needed
+                # Resample data if needed, before setting up multi-index
                 if interval != '1d':  # Only resample if not daily
                     # For weekly data, use market open (14:30 UTC) as anchor point
                     if interval == '1W':
                         offset = pd.Timedelta(hours=14, minutes=30)
-                        resampler = df.groupby('symbol').resample(interval, offset=offset, level='datetime')
+                        resampler = df.resample(interval, offset=offset)
                     else:
-                        resampler = df.groupby('symbol').resample(interval, level='datetime')
+                        resampler = df.resample(interval)
                     
                     df = resampler.agg({
                         'open': 'first',
@@ -333,6 +325,14 @@ class MarketDataManager:
                         'close': 'last',
                         'volume': 'sum'
                     })
+                
+                # Add symbol column and set multi-index after resampling
+                df['symbol'] = symbol
+                df = df.reset_index()
+                df = df.rename(columns={'Date': 'datetime'})
+                # Ensure datetime column is properly named and set as index
+                df = df.set_index(['symbol', 'datetime'])
+                df.index.names = ['symbol', 'datetime']  # Explicitly set index names
                 
                 data_frames.append(df)
                 logger.info(f"Successfully fetched data for {symbol}")
