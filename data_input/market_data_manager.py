@@ -311,12 +311,9 @@ class MarketDataManager:
                 
                 # Resample data if needed, before setting up multi-index
                 if interval != '1d':  # Only resample if not daily
-                    # For weekly data, use market open (14:30 UTC) as anchor point
-                    if interval == '1W':
-                        offset = pd.Timedelta(hours=14, minutes=30)
-                        resampler = df.resample(interval, offset=offset)
-                    else:
-                        resampler = df.resample(interval)
+                    # For all intervals, use market open (14:30 UTC) as anchor point
+                    offset = pd.Timedelta(hours=14, minutes=30)
+                    resampler = df.resample(interval, offset=offset)
                     
                     df = resampler.agg({
                         'open': 'first',
