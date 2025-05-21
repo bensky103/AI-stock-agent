@@ -70,7 +70,10 @@ class MLHybridStrategy(TradingStrategy):
         try:
             # Get latest data point
             current = data.iloc[-1]
-            current_price = current['Close']
+            
+            # Handle case sensitivity for price column
+            price_col = 'close' if 'close' in current else 'Close'
+            current_price = current[price_col]
             
             # Calculate ML signal
             price_change = (prediction - current_price) / current_price
@@ -115,6 +118,10 @@ class MLHybridStrategy(TradingStrategy):
         }
         
         try:
+            # Handle case sensitivity for columns
+            price_col = 'close' if 'close' in data else 'Close'
+            volume_col = 'volume' if 'volume' in data else 'Volume'
+            
             # RSI signals
             if 'RSI' in data:
                 if data['RSI'] > 70:
@@ -137,8 +144,8 @@ class MLHybridStrategy(TradingStrategy):
                     signals['ma'] = -1  # Bearish
             
             # Volume signals
-            if 'Volume_MA' in data and 'Volume' in data:
-                if data['Volume'] > data['Volume_MA'] * 1.5:
+            if 'Volume_MA' in data and volume_col in data:
+                if data[volume_col] > data['Volume_MA'] * 1.5:
                     signals['volume'] = 1  # High volume
                     
         except Exception as e:
