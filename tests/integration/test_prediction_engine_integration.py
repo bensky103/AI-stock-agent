@@ -14,7 +14,31 @@ import json
 class TestPredictionEngineIntegration:
     @pytest.fixture
     def setup_prediction_components(self, test_config):
-        """Set up prediction engine components for testing."""
+        """Set up prediction components for testing"""
+        # Create model directory and config
+        model_path = Path("colab_training/tft_model")
+        config_path = model_path / "model_config.json"
+        
+        # Create model config if it doesn't exist
+        if not config_path.exists():
+            model_config = {
+                "model_config": {
+                    "hidden_layer_size": 128,
+                    "attention_head_size": 8,
+                    "dropout_rate": 0.1,
+                    "max_gradient_norm": 0.01,
+                    "learning_rate": 0.0005,
+                    "num_encoder_steps": 30,
+                    "num_steps": 5
+                },
+                "best_val_loss": float('inf'),
+                "best_epoch": 0,
+                "training_history": []
+            }
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(config_path, 'w') as f:
+                json.dump(model_config, f)
+        
         # Create necessary directories and files
         saved_models_dir = Path("saved_models")
         saved_models_dir.mkdir(exist_ok=True)
@@ -49,15 +73,17 @@ class TestPredictionEngineIntegration:
             # Create default model config if colab_training files don't exist
             model_config = {
                 'model_config': {
-                    'num_encoder_steps': 20,
-                    'num_decoder_steps': 1,
-                    'hidden_size': 64,
-                    'num_heads': 4,
-                    'num_layers': 2,
-                    'dropout': 0.1,
-                    'sequence_length': 20,
-                    'prediction_horizon': 1
-                }
+                    'hidden_layer_size': 128,
+                    'attention_head_size': 8,
+                    'dropout_rate': 0.1,
+                    'max_gradient_norm': 0.01,
+                    'learning_rate': 0.0005,
+                    'num_encoder_steps': 30,
+                    'num_steps': 5
+                },
+                'best_val_loss': float('inf'),
+                'best_epoch': 0,
+                'training_history': []
             }
             with open(model_path / "model_config.json", 'w') as f:
                 json.dump(model_config, f)
