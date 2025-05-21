@@ -23,6 +23,7 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import joblib
+import yaml
 
 from .feature_engineering import FeatureEngineer
 from .sequence_preprocessor import SequencePreprocessor
@@ -81,6 +82,7 @@ class EnhancedStockPredictor:
         self.device = device
         self.model_type = model_type
         self.model = None  # Will be initialized when loading a model
+        self.default_model_dir = Path("colab_training/tft_model")
         self.saved_models_dir = Path("saved_models")
         self.saved_models_dir.mkdir(exist_ok=True)
         
@@ -105,10 +107,10 @@ class EnhancedStockPredictor:
         self.scaler_handler = ScalerHandler(model_type='tft')
         
         # Load global training config
-        config_path = self.saved_models_dir / "training_config.json"
+        config_path = self.default_model_dir / "config.yaml"
         if config_path.exists():
             with open(config_path, 'r') as f:
-                self.training_config = json.load(f)
+                self.training_config = yaml.safe_load(f)
             logger.info("Loaded global training configuration")
         else:
             logger.warning("No global training configuration found")
@@ -123,7 +125,7 @@ class EnhancedStockPredictor:
         """Load a trained model from disk."""
         try:
             if model_path is None:
-                model_path = self.saved_models_dir / "tft_model"
+                model_path = self.default_model_dir
             config_path = model_path / "config.yaml"
             
             if not model_path.exists():
