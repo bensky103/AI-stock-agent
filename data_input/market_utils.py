@@ -200,20 +200,20 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
     Returns:
         Resampled DataFrame
     """
-    # Define aggregation rules for each column
+    # Define aggregation rules for each column using pandas functions
     agg_dict = {
-        'open': 'first',
-        'high': 'max',
-        'low': 'min',
-        'close': 'last',
-        'volume': 'sum',
-        'dividends': 'sum',
-        'stock splits': 'sum'
+        'open': pd.NamedAgg(column='open', aggfunc='first'),
+        'high': pd.NamedAgg(column='high', aggfunc='max'),
+        'low': pd.NamedAgg(column='low', aggfunc='min'),
+        'close': pd.NamedAgg(column='close', aggfunc='last'),
+        'volume': pd.NamedAgg(column='volume', aggfunc='sum'),
+        'dividends': pd.NamedAgg(column='dividends', aggfunc='sum'),
+        'stock splits': pd.NamedAgg(column='stock splits', aggfunc='sum')
     }
     
     # Group by symbol and resample
     resampled = df.groupby(level=0).apply(
-        lambda x: x.droplevel(0).resample(interval).agg(agg_dict)
+        lambda x: x.droplevel(0).resample(interval).agg(**agg_dict)
     )
     
     return resampled

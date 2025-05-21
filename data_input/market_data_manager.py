@@ -102,26 +102,37 @@ class YFinanceSource:
         
         # Use yfinance to fetch real data
         ticker = yf.Ticker(symbol)
-        df = ticker.history(start=start_date, end=end_date)
-        
-        if df.empty:
-            raise MarketDataError(f"No data available for {symbol}")
-        
-        # Convert column names to lowercase
-        df.columns = df.columns.str.lower()
-        
-        # Validate raw data immediately after fetching
         try:
-            validate_market_data(
-                df,
-                min_rows=1,  # Allow any number of rows for initial validation
-                require_indicators=False  # Don't require indicators for raw data
-            )
-        except MarketDataError as e:
-            logger.error(f"Validation failed for {symbol}: {str(e)}")
-            raise MarketDataError(f"Invalid data for {symbol}: {str(e)}")
-        
-        return df
+            df = ticker.history(start=start_date, end=end_date, auto_adjust=False)
+            
+            if df.empty:
+                raise MarketDataError(f"No data available for {symbol}")
+            
+            # Ensure we have all required columns
+            required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+            missing_cols = [col for col in required_cols if col not in df.columns]
+            if missing_cols:
+                raise MarketDataError(f"Missing required columns from yfinance: {missing_cols}")
+            
+            # Convert column names to lowercase
+            df.columns = df.columns.str.lower()
+            
+            # Validate raw data immediately after fetching
+            try:
+                validate_market_data(
+                    df,
+                    min_rows=1,  # Allow any number of rows for initial validation
+                    require_indicators=False  # Don't require indicators for raw data
+                )
+            except MarketDataError as e:
+                logger.error(f"Validation failed for {symbol}: {str(e)}")
+                raise MarketDataError(f"Invalid data for {symbol}: {str(e)}")
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"Error fetching data from yfinance for {symbol}: {str(e)}")
+            raise MarketDataError(f"Error fetching data for {symbol}: {str(e)}")
 
 class MarketDataManager:
     """Manages market data fetching, caching, and updates."""
