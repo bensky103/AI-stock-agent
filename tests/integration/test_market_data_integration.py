@@ -84,12 +84,8 @@ class TestMarketDataIntegration:
         elif enhanced_dates.tz != pytz.UTC:
             enhanced_dates = enhanced_dates.tz_convert(pytz.UTC)
 
-        # Normalize timestamps to midnight UTC
-        market_dates = pd.DatetimeIndex([d.replace(hour=0, minute=0, second=0, microsecond=0) for d in market_dates])
-        enhanced_dates = pd.DatetimeIndex([d.replace(hour=0, minute=0, second=0, microsecond=0) for d in enhanced_dates])
-
-        # Compare dates
-        assert market_dates.equals(enhanced_dates), "Date indices should match after normalization"
+        # Compare dates directly - they should both be at market open (14:30 UTC)
+        assert market_dates.equals(enhanced_dates), "Date indices should match at market open (14:30 UTC)"
 
         # Compare data values
         for col in ['open', 'high', 'low', 'close', 'volume']:
