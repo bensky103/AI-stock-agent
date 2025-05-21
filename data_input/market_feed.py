@@ -579,6 +579,10 @@ class MarketFeed:
                 logger.warning(f"No data found for {symbol}")
                 return None
             
+            # Log original timestamps
+            logger.info(f"Original timestamps for {symbol} (first 3):")
+            logger.info(f"{data.index[:3]}")
+            
             # Standardize column names
             data = data.rename(columns={
                 'Adj Close': 'adj_close',
@@ -589,8 +593,16 @@ class MarketFeed:
                 'Volume': 'volume'
             })
             
+            # Log timestamps before normalization
+            logger.info(f"Timestamps before normalization for {symbol} (first 3):")
+            logger.info(f"{data.index[:3]}")
+            
             # Normalize timestamps to market open (14:30 UTC)
             data.index = data.index.map(lambda x: x.replace(hour=14, minute=30, second=0, microsecond=0))
+            
+            # Log timestamps after normalization
+            logger.info(f"Timestamps after normalization for {symbol} (first 3):")
+            logger.info(f"{data.index[:3]}")
             
             return data
             

@@ -113,6 +113,10 @@ class YFinanceSource:
             if df.empty:
                 raise MarketDataError(f"No data available for {symbol}")
             
+            # Log original timestamps
+            logger.info(f"Original timestamps from Ticker.history for {symbol} (first 3):")
+            logger.info(f"{df.index[:3]}")
+            
             # Log original columns
             logger.info(f"Original columns from yfinance: {df.columns.tolist()}")
             
@@ -146,8 +150,16 @@ class YFinanceSource:
             })
             logger.info(f"Final columns after renaming: {df.columns.tolist()}")
             
+            # Log timestamps before normalization
+            logger.info(f"Timestamps before normalization for {symbol} (first 3):")
+            logger.info(f"{df.index[:3]}")
+            
             # Normalize timestamps to market open (14:30 UTC)
             df.index = df.index.map(lambda x: x.replace(hour=14, minute=30, second=0, microsecond=0))
+            
+            # Log timestamps after normalization
+            logger.info(f"Timestamps after normalization for {symbol} (first 3):")
+            logger.info(f"{df.index[:3]}")
             
             # Validate raw data immediately after fetching
             try:
