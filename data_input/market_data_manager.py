@@ -317,6 +317,23 @@ class MarketDataManager:
                 df = df.set_index(['symbol', 'datetime'])
                 df.index.names = ['symbol', 'datetime']  # Explicitly set index names
                 
+                # Resample data if needed
+                if interval != '1d':  # Only resample if not daily
+                    # For weekly data, use market open (14:30 UTC) as anchor point
+                    if interval == '1W':
+                        offset = pd.Timedelta(hours=14, minutes=30)
+                        resampler = df.groupby('symbol').resample(interval, offset=offset, level='datetime')
+                    else:
+                        resampler = df.groupby('symbol').resample(interval, level='datetime')
+                    
+                    df = resampler.agg({
+                        'open': 'first',
+                        'high': 'max',
+                        'low': 'min',
+                        'close': 'last',
+                        'volume': 'sum'
+                    })
+                
                 data_frames.append(df)
                 logger.info(f"Successfully fetched data for {symbol}")
                 
@@ -331,16 +348,6 @@ class MarketDataManager:
         
         # Concatenate all data frames
         result = pd.concat(data_frames, axis=0)
-        
-        # Resample data if interval is not '1d'
-        if interval != '1d':
-            logger.info(f"Resampling data to {interval} interval")
-            try:
-                result = resample_market_data(result, interval)
-                logger.info(f"Successfully resampled data to {interval}")
-            except Exception as e:
-                logger.error(f"Error resampling data to {interval}: {str(e)}")
-                raise MarketDataError(f"Error resampling data to {interval}: {str(e)}")
         
         return result
     

@@ -29,7 +29,7 @@ from requests.exceptions import RequestException
 import threading
 from queue import Queue
 import pytz
-from .market_utils import validate_market_data, clean_market_data
+from .market_utils import validate_market_data, clean_market_data, resample_market_data
 
 # Ensure logs directory exists
 import os
@@ -485,7 +485,6 @@ class MarketFeed:
                 resample_interval = self.default_interval
             
             if resample_interval != '1d':  # Only resample if not daily
-                from .market_utils import resample_market_data
                 # Ensure we have the required columns before resampling
                 required_cols = ['open', 'high', 'low', 'close', 'volume']
                 
@@ -507,7 +506,14 @@ class MarketFeed:
                     for symbol in df.index.get_level_values('symbol').unique():
                         symbol_data = df.xs(symbol, level='symbol')
                         try:
-                            resampled = symbol_data.resample(resample_interval).agg({
+                            # For weekly data, use market open (14:30 UTC) as anchor point
+                            if resample_interval == '1W':
+                                offset = pd.Timedelta(hours=14, minutes=30)
+                                resampler = symbol_data.resample(resample_interval, offset=offset)
+                            else:
+                                resampler = symbol_data.resample(resample_interval)
+                            
+                            resampled = resampler.agg({
                                 'open': 'first',
                                 'high': 'max',
                                 'low': 'min',
