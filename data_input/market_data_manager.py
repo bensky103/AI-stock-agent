@@ -10,7 +10,7 @@ import json
 import yaml
 import time
 import os
-from .market_utils import validate_market_data, MarketDataError
+from .market_utils import validate_market_data, MarketDataError, resample_market_data
 import yfinance as yf
 
 # Ensure logs directory exists
@@ -214,7 +214,7 @@ class MarketDataManager:
             symbols: Single symbol or list of symbols to fetch
             start_date: Start date for data fetch
             end_date: End date for data fetch
-            interval: Data interval (e.g., '1d', '1h')
+            interval: Data interval (e.g., '1d', '1h', '1W')
             use_cache: Whether to use cached results
             add_indicators: Whether to add technical indicators
             
@@ -318,7 +318,19 @@ class MarketDataManager:
             raise MarketDataError("No data available for any symbols")
         
         # Concatenate all data frames
-        return pd.concat(data_frames, axis=0)
+        result = pd.concat(data_frames, axis=0)
+        
+        # Resample data if interval is not '1d'
+        if interval != '1d':
+            logger.info(f"Resampling data to {interval} interval")
+            try:
+                result = resample_market_data(result, interval)
+                logger.info(f"Successfully resampled data to {interval}")
+            except Exception as e:
+                logger.error(f"Error resampling data to {interval}: {str(e)}")
+                raise MarketDataError(f"Error resampling data to {interval}: {str(e)}")
+        
+        return result
     
     def _check_rate_limit(self) -> bool:
         """Check if we're within rate limits.
