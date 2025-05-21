@@ -204,30 +204,28 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
     if not isinstance(df.index, pd.MultiIndex):
         raise ValueError("DataFrame must have a multi-index with 'symbol' and datetime levels")
     
-    # Get the level numbers for symbol and datetime
-    # The datetime level is always the one that's not 'symbol'
-    symbol_level = 0 if df.index.names[0] == 'symbol' else 1
-    datetime_level = 1 if symbol_level == 0 else 0
-    
     # Get the original end date from the input data
+    # Find the datetime level by looking for the one that's not 'symbol'
+    datetime_level = next(i for i, name in enumerate(df.index.names) if name != 'symbol')
     original_end_date = df.index.get_level_values(datetime_level).max()
     
     # Process each symbol separately
     resampled_dfs = []
-    for symbol in df.index.get_level_values(symbol_level).unique():
+    for symbol in df.index.get_level_values('symbol').unique():
         # Get data for this symbol
-        symbol_data = df.xs(symbol, level=symbol_level)
+        symbol_data = df.xs(symbol, level='symbol')
         
-        # Create resampler
-        resampler = symbol_data.resample(interval, level=datetime_level)
+        # Create resampler on the datetime index
+        resampler = symbol_data.resample(interval)
         
-        # Apply aggregations and create DataFrame with proper index
-        resampled = pd.DataFrame(index=resampler.indices.keys())
-        resampled['open'] = resampler['open'].first()
-        resampled['high'] = resampler['high'].max()
-        resampled['low'] = resampler['low'].min()
-        resampled['close'] = resampler['close'].last()
-        resampled['volume'] = resampler['volume'].sum()
+        # Apply aggregations
+        resampled = pd.DataFrame({
+            'open': resampler['open'].first(),
+            'high': resampler['high'].max(),
+            'low': resampler['low'].min(),
+            'close': resampler['close'].last(),
+            'volume': resampler['volume'].sum()
+        })
         
         # Filter out data points beyond the original end date
         resampled = resampled[resampled.index <= original_end_date]
@@ -236,8 +234,8 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
         resampled['symbol'] = symbol
         resampled = resampled.set_index('symbol', append=True)
         
-        # Reorder index levels to match input
-        resampled = resampled.reorder_levels([symbol_level, datetime_level])
+        # Reorder index levels to match input (symbol first, then datetime)
+        resampled = resampled.reorder_levels(['symbol', 0])
         
         resampled_dfs.append(resampled)
     
