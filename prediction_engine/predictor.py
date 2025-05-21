@@ -124,7 +124,7 @@ class EnhancedStockPredictor:
         try:
             if model_path is None:
                 model_path = self.saved_models_dir / "tft_model"
-            config_path = model_path.parent / "tft_config.yaml"
+            config_path = model_path / "config.yaml"
             
             if not model_path.exists():
                 raise FileNotFoundError(f"Model path does not exist: {model_path}")

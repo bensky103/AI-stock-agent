@@ -109,16 +109,17 @@ class TestPredictionEngineIntegration:
                 json.dump(training_config, f)
         
         # Create main config file
-        config_path = saved_models_dir / "tft_config.yaml"
-        with open(config_path, 'w') as f:
-            yaml.dump({
-                'sequence_length': 20,
-                'prediction_horizon': 1,
-                'hidden_size': 64,
-                'num_heads': 4,
-                'num_layers': 2,
-                'dropout': 0.1
-            }, f)
+        config_path = colab_model_path / "config.yaml"
+        if not config_path.exists():
+            with open(config_path, 'w') as f:
+                yaml.dump({
+                    'sequence_length': 20,
+                    'prediction_horizon': 1,
+                    'hidden_size': 64,
+                    'num_heads': 4,
+                    'num_layers': 2,
+                    'dropout': 0.1
+                }, f)
         
         # Initialize components with correct arguments
         feature_engineer = FeatureEngineer(
