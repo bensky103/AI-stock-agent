@@ -17,7 +17,7 @@ class TestPredictionEngineIntegration:
         """Set up prediction components for testing"""
         # Create model directory and config
         model_path = Path("colab_training/tft_model")
-        config_path = model_path / "model_config.json"
+        config_path = model_path / "config.yaml"
         
         # Create model config if it doesn't exist
         if not config_path.exists():
@@ -37,89 +37,7 @@ class TestPredictionEngineIntegration:
             }
             config_path.parent.mkdir(parents=True, exist_ok=True)
             with open(config_path, 'w') as f:
-                json.dump(model_config, f)
-        
-        # Create necessary directories and files
-        saved_models_dir = Path("saved_models")
-        saved_models_dir.mkdir(exist_ok=True)
-        
-        # Create dummy model and config files
-        model_path = saved_models_dir / "tft_model"
-        model_path.mkdir(exist_ok=True)
-        
-        # Copy training config from colab_training
-        colab_model_path = Path("colab_training/tft_model")
-        if colab_model_path.exists():
-            # Copy model config
-            with open(colab_model_path / "model_config.json", 'r') as f:
-                model_config = json.load(f)
-            with open(model_path / "model_config.json", 'w') as f:
-                json.dump(model_config, f)
-            
-            # Copy training config
-            with open(colab_model_path / "config.yaml", 'r') as f:
-                training_config = yaml.safe_load(f)
-            with open(saved_models_dir / "training_config.json", 'w') as f:
-                json.dump(training_config, f)
-            
-            # Copy formatter config if it exists
-            formatter_config_path = colab_model_path / "formatter_config.json"
-            if formatter_config_path.exists():
-                with open(formatter_config_path, 'r') as f:
-                    formatter_config = json.load(f)
-                with open(model_path / "formatter_config.json", 'w') as f:
-                    json.dump(formatter_config, f)
-        else:
-            # Create default model config if colab_training files don't exist
-            model_config = {
-                'model_config': {
-                    'hidden_layer_size': 128,
-                    'attention_head_size': 8,
-                    'dropout_rate': 0.1,
-                    'max_gradient_norm': 0.01,
-                    'learning_rate': 0.0005,
-                    'num_encoder_steps': 30,
-                    'num_steps': 5
-                },
-                'best_val_loss': float('inf'),
-                'best_epoch': 0,
-                'training_history': []
-            }
-            with open(model_path / "model_config.json", 'w') as f:
-                json.dump(model_config, f)
-            
-            # Create default training config
-            training_config = {
-                'model': {
-                    'sequence_length': 20,
-                    'prediction_horizon': 1,
-                    'hidden_size': 64,
-                    'num_heads': 4,
-                    'num_layers': 2,
-                    'dropout': 0.1
-                },
-                'training': {
-                    'batch_size': 32,
-                    'learning_rate': 0.001,
-                    'max_epochs': 100,
-                    'early_stopping_patience': 10
-                }
-            }
-            with open(saved_models_dir / "training_config.json", 'w') as f:
-                json.dump(training_config, f)
-        
-        # Create main config file
-        config_path = colab_model_path / "config.yaml"
-        if not config_path.exists():
-            with open(config_path, 'w') as f:
-                yaml.dump({
-                    'sequence_length': 20,
-                    'prediction_horizon': 1,
-                    'hidden_size': 64,
-                    'num_heads': 4,
-                    'num_layers': 2,
-                    'dropout': 0.1
-                }, f)
+                yaml.dump(model_config, f)
         
         # Initialize components with correct arguments
         feature_engineer = FeatureEngineer(

@@ -32,6 +32,10 @@ from .tft_predictor import TFTPredictor, TFTPredictorError
 from data_input.market_feed import get_market_data
 from data_input.sentiment_manager import get_sentiment_data
 
+class StockPredictorError(Exception):
+    """Exception class for stock predictor errors."""
+    pass
+
 # Configure logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
