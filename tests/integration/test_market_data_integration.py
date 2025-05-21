@@ -7,6 +7,7 @@ from data_input.market_feed import MarketFeed
 from data_input.market_data_manager import MarketDataManager
 from data_input import market_utils
 import pytz
+import numpy as np
 
 class TestMarketDataIntegration:
     @pytest.fixture
@@ -159,11 +160,26 @@ class TestMarketDataIntegration:
         assert len(market_data) >= 8  # Ensure enough weekly data points
         assert len(enhanced_data) >= 8  # Ensure enough weekly data points
         
-        # Convert dates to UTC for comparison
-        market_dates = market_data.index.get_level_values('datetime').tz_localize(pytz.UTC)
-        enhanced_dates = enhanced_data.index.get_level_values('datetime').tz_localize(pytz.UTC)
+        # Get dates and convert to UTC if needed
+        market_dates = market_data.index.get_level_values('datetime')
+        enhanced_dates = enhanced_data.index.get_level_values('datetime')
         
-        assert market_dates.min() >= start_date
-        assert market_dates.max() <= end_date
-        assert enhanced_dates.min() >= start_date
-        assert enhanced_dates.max() <= end_date 
+        # Convert to UTC if not already in UTC
+        if market_dates.tz is None:
+            market_dates = market_dates.tz_localize(pytz.UTC)
+        elif market_dates.tz != pytz.UTC:
+            market_dates = market_dates.tz_convert(pytz.UTC)
+        
+        if enhanced_dates.tz is None:
+            enhanced_dates = enhanced_dates.tz_localize(pytz.UTC)
+        elif enhanced_dates.tz != pytz.UTC:
+            enhanced_dates = enhanced_dates.tz_convert(pytz.UTC)
+
+        # Compare dates
+        assert market_dates.equals(enhanced_dates), "Date indices should match"
+
+        # Compare data values
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            market_values = market_data[col].values
+            enhanced_values = enhanced_data[col].values
+            np.testing.assert_array_almost_equal(market_values, enhanced_values, decimal=2) 
