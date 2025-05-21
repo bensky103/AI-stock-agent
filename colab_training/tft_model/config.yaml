@@ -1,16 +1,6 @@
-data:
-  context_length: 30
-  prediction_horizon: 5
-  target_stocks:
-  - NVDA
-  - MSFT
-  - AAPL
-  - PLTR
-  - CRM
-  - ADBE
-  - INTC
-  - AMD
-model:
+best_epoch: 0
+best_val_loss: .inf
+model_config:
   attention_head_size: 8
   dropout_rate: 0.1
   hidden_layer_size: 128
@@ -18,15 +8,4 @@ model:
   max_gradient_norm: 0.01
   num_encoder_steps: 30
   num_steps: 5
-output:
-  model_dir: /content/drive/MyDrive/colab_training/outputs/tft_model
-  save_training_plots: true
-training:
-  early_stopping_patience: 15
-  lr_schedule_factor: 0.7
-  lr_schedule_patience: 8
-  min_lr: 1.0e-05
-  minibatch_size: 128
-  num_epochs: 100
-  use_model_checkpoint: true
-  use_reduce_lr_on_plateau: true
+training_history: []
