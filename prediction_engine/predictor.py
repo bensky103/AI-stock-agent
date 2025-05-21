@@ -84,6 +84,15 @@ class EnhancedStockPredictor:
         self.saved_models_dir = Path("saved_models")
         self.saved_models_dir.mkdir(exist_ok=True)
         
+        # Initialize logger
+        self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(logging.WARNING)
+        if not self.logger.handlers:
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+            handler.setFormatter(formatter)
+            self.logger.addHandler(handler)
+        
         # Initialize components
         self.feature_engineer = FeatureEngineer(
             sequence_length=sequence_length,

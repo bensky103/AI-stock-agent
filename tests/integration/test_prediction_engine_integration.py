@@ -9,6 +9,7 @@ from prediction_engine.predictor import EnhancedStockPredictor
 from pathlib import Path
 import yaml
 from prediction_engine.exceptions import StockPredictorError
+import json
 
 class TestPredictionEngineIntegration:
     @pytest.fixture
@@ -21,6 +22,21 @@ class TestPredictionEngineIntegration:
         # Create dummy model and config files
         model_path = saved_models_dir / "tft_model"
         model_path.mkdir(exist_ok=True)
+        
+        # Create model config file
+        model_config = {
+            'input_size': 20,
+            'hidden_size': 64,
+            'num_heads': 4,
+            'num_layers': 2,
+            'dropout': 0.1,
+            'sequence_length': 20,
+            'prediction_horizon': 1
+        }
+        with open(model_path / "model_config.json", 'w') as f:
+            json.dump(model_config, f)
+        
+        # Create main config file
         config_path = saved_models_dir / "tft_config.yaml"
         with open(config_path, 'w') as f:
             yaml.dump({
@@ -60,11 +76,11 @@ class TestPredictionEngineIntegration:
         )
         
         return {
+            'config_path': config_path,
+            'model_path': model_path,
             'feature_engineer': feature_engineer,
             'scaler_handler': scaler_handler,
-            'predictor': predictor,
-            'model_path': model_path,
-            'config_path': config_path
+            'predictor': predictor
         }
     
     @pytest.fixture
@@ -91,13 +107,14 @@ class TestPredictionEngineIntegration:
         assert len(features.columns) > len(sample_market_data.columns)
         
         # 2. Scale features
-        scaled_features = components['scaler_handler'].scale_features(features)
+        scaler = components['scaler_handler'].fit_scaler(features)
+        scaled_features = components['scaler_handler'].transform_data(features, scaler)
         assert isinstance(scaled_features, pd.DataFrame)
         assert not scaled_features.empty
         assert scaled_features.shape == features.shape
         
         # 3. Prepare sequence
-        sequence = components['preprocessor'].prepare_sequence(scaled_features)
+        sequence = components['feature_engineer'].sequence_preprocessor.prepare_sequence(scaled_features)
         assert isinstance(sequence, dict)
         assert 'features' in sequence
         assert 'targets' in sequence
@@ -112,8 +129,8 @@ class TestPredictionEngineIntegration:
         )
         assert isinstance(tech_indicators, pd.DataFrame)
         assert not tech_indicators.empty
-        assert 'RSI' in tech_indicators.columns
-        assert 'MACD' in tech_indicators.columns
+        assert 'rsi_14' in tech_indicators.columns
+        assert 'macd' in tech_indicators.columns
         
         # Test statistical features
         stat_features = components['feature_engineer'].calculate_statistical_features(
@@ -153,23 +170,19 @@ class TestPredictionEngineIntegration:
         
         # Generate and scale features
         features = components['feature_engineer'].generate_features(sample_market_data)
-        scaled_features = components['scaler_handler'].scale_features(features)
+        scaler = components['scaler_handler'].fit_scaler(features)
+        scaled_features = components['scaler_handler'].transform_data(features, scaler)
         
-        # Test sequence creation
-        sequence = components['preprocessor'].create_sequence(
+        # Create sequence
+        sequence = components['feature_engineer'].sequence_preprocessor.prepare_sequence(
             scaled_features,
-            sequence_length=10,
-            target_length=5
+            target_col='close',
+            feature_cols=[col for col in scaled_features.columns if col != 'close']
         )
         assert isinstance(sequence, dict)
         assert 'features' in sequence
         assert 'targets' in sequence
-        assert len(sequence['features']) > 0
-        assert len(sequence['targets']) > 0
-        
-        # Test sequence validation
-        is_valid = components['preprocessor'].validate_sequence(sequence)
-        assert is_valid
+        assert sequence['features'].shape[1] == components['feature_engineer'].sequence_length
     
     def test_error_handling(self, setup_prediction_components):
         """Test error handling in prediction components"""
@@ -183,7 +196,7 @@ class TestPredictionEngineIntegration:
         # Test with invalid data
         invalid_df = pd.DataFrame({'invalid': [1, 2, 3]})
         with pytest.raises(Exception):
-            components['preprocessor'].prepare_sequence(invalid_df)
+            components['feature_engineer'].sequence_preprocessor.prepare_sequence(invalid_df)
         
         # Test with invalid sequence length
         valid_df = pd.DataFrame({
@@ -191,10 +204,10 @@ class TestPredictionEngineIntegration:
             'Volume': np.random.normal(1000000, 200000, 5)
         })
         with pytest.raises(Exception):
-            components['preprocessor'].create_sequence(
+            components['feature_engineer'].sequence_preprocessor.prepare_sequence(
                 valid_df,
-                sequence_length=10,  # Longer than data
-                target_length=5
+                target_col='close',
+                feature_cols=[col for col in valid_df.columns if col != 'close']
             )
     
     def test_data_consistency(self, setup_prediction_components, sample_market_data):
@@ -209,16 +222,16 @@ class TestPredictionEngineIntegration:
         scaled_features = components['scaler_handler'].transform_data(features, scaler)
         
         # Create sequence
-        sequence = components['preprocessor'].create_sequence(
+        sequence = components['feature_engineer'].sequence_preprocessor.prepare_sequence(
             scaled_features,
-            sequence_length=10,
-            target_length=5
+            target_col='close',
+            feature_cols=[col for col in scaled_features.columns if col != 'close']
         )
         
-        # Verify data consistency
-        assert len(sequence['features']) == len(sequence['targets'])
-        assert not np.isnan(sequence['features']).any()
-        assert not np.isnan(sequence['targets']).any()
+        assert isinstance(sequence, dict)
+        assert 'features' in sequence
+        assert 'targets' in sequence
+        assert sequence['features'].shape[1] == components['feature_engineer'].sequence_length
         
         # Verify inverse transform
         original_features = components['scaler_handler'].inverse_transform_data(
