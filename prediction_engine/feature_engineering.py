@@ -145,6 +145,10 @@ class FeatureEngineer:
     
     def calculate_technical_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """Calculate technical indicators."""
+        # Convert column names to lowercase for consistency
+        df = df.copy()
+        df.columns = df.columns.str.lower()
+        
         result = df.copy()
         
         # Trend indicators
@@ -391,8 +395,8 @@ class FeatureEngineer:
         # Calculate technical indicators
         features = self.calculate_technical_indicators(df)
         
-        # Normalize features
-        features, _, _ = self.normalize_features(features)
+        # Normalize features with fit=True to ensure scaler is fitted
+        features, _, _ = self.normalize_features(features, fit=True)
         
         return features
 
