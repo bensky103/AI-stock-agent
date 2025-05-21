@@ -23,21 +23,64 @@ class TestPredictionEngineIntegration:
         model_path = saved_models_dir / "tft_model"
         model_path.mkdir(exist_ok=True)
         
-        # Create model config file
-        model_config = {
-            'model_config': {
-                'num_encoder_steps': 20,
-                'num_decoder_steps': 1,
-                'hidden_size': 64,
-                'num_heads': 4,
-                'num_layers': 2,
-                'dropout': 0.1,
-                'sequence_length': 20,
-                'prediction_horizon': 1
+        # Copy training config from colab_training
+        colab_model_path = Path("colab_training/tft_model")
+        if colab_model_path.exists():
+            # Copy model config
+            with open(colab_model_path / "model_config.json", 'r') as f:
+                model_config = json.load(f)
+            with open(model_path / "model_config.json", 'w') as f:
+                json.dump(model_config, f)
+            
+            # Copy training config
+            with open(colab_model_path / "config.yaml", 'r') as f:
+                training_config = yaml.safe_load(f)
+            with open(saved_models_dir / "training_config.json", 'w') as f:
+                json.dump(training_config, f)
+            
+            # Copy formatter config if it exists
+            formatter_config_path = colab_model_path / "formatter_config.json"
+            if formatter_config_path.exists():
+                with open(formatter_config_path, 'r') as f:
+                    formatter_config = json.load(f)
+                with open(model_path / "formatter_config.json", 'w') as f:
+                    json.dump(formatter_config, f)
+        else:
+            # Create default model config if colab_training files don't exist
+            model_config = {
+                'model_config': {
+                    'num_encoder_steps': 20,
+                    'num_decoder_steps': 1,
+                    'hidden_size': 64,
+                    'num_heads': 4,
+                    'num_layers': 2,
+                    'dropout': 0.1,
+                    'sequence_length': 20,
+                    'prediction_horizon': 1
+                }
             }
-        }
-        with open(model_path / "model_config.json", 'w') as f:
-            json.dump(model_config, f)
+            with open(model_path / "model_config.json", 'w') as f:
+                json.dump(model_config, f)
+            
+            # Create default training config
+            training_config = {
+                'model': {
+                    'sequence_length': 20,
+                    'prediction_horizon': 1,
+                    'hidden_size': 64,
+                    'num_heads': 4,
+                    'num_layers': 2,
+                    'dropout': 0.1
+                },
+                'training': {
+                    'batch_size': 32,
+                    'learning_rate': 0.001,
+                    'max_epochs': 100,
+                    'early_stopping_patience': 10
+                }
+            }
+            with open(saved_models_dir / "training_config.json", 'w') as f:
+                json.dump(training_config, f)
         
         # Create main config file
         config_path = saved_models_dir / "tft_config.yaml"
