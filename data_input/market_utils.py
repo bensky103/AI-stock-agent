@@ -204,9 +204,10 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
     if not isinstance(df.index, pd.MultiIndex):
         raise ValueError("DataFrame must have a multi-index with 'symbol' and datetime levels")
     
-    # Get the symbol level name
-    symbol_level = df.index.names[0] if df.index.names[0] == 'symbol' else df.index.names[1]
-    datetime_level = df.index.names[1] if df.index.names[0] == 'symbol' else df.index.names[0]
+    # Get the level numbers for symbol and datetime
+    # The datetime level is always the one that's not 'symbol'
+    symbol_level = 0 if df.index.names[0] == 'symbol' else 1
+    datetime_level = 1 if symbol_level == 0 else 0
     
     # Get the original end date from the input data
     original_end_date = df.index.get_level_values(datetime_level).max()
@@ -232,14 +233,11 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
         resampled = resampled[resampled.index <= original_end_date]
         
         # Add symbol back
-        resampled[symbol_level] = symbol
-        resampled = resampled.set_index(symbol_level, append=True)
+        resampled['symbol'] = symbol
+        resampled = resampled.set_index('symbol', append=True)
         
         # Reorder index levels to match input
-        if df.index.names[0] == 'symbol':
-            resampled = resampled.reorder_levels([symbol_level, datetime_level])
-        else:
-            resampled = resampled.reorder_levels([datetime_level, symbol_level])
+        resampled = resampled.reorder_levels([symbol_level, datetime_level])
         
         resampled_dfs.append(resampled)
     
@@ -248,6 +246,9 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
     
     # Sort index
     result = result.sort_index()
+    
+    # Ensure index names are set correctly
+    result.index.names = ['symbol', 'datetime']
     
     return result
 
