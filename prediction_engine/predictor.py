@@ -132,19 +132,28 @@ class EnhancedStockPredictor:
                 model_path = self.default_model_dir
             config_path = model_path / "config.yaml"
             
+            # Check paths first and raise StockPredictorError directly
             if not model_path.exists():
-                raise FileNotFoundError(f"Model path does not exist: {model_path}")
+                raise StockPredictorError(f"Model path does not exist: {model_path}")
             if not config_path.exists():
-                raise FileNotFoundError(f"Config path does not exist: {config_path}")
+                raise StockPredictorError(f"Config path does not exist: {config_path}")
             
-            self.model = TFTPredictor(
-                model_path=str(model_path),
-                config_path=str(config_path)
-            )
-            self.logger.info(f"Model loaded successfully from {model_path}")
+            try:
+                self.model = TFTPredictor(
+                    model_path=str(model_path),
+                    config_path=str(config_path)
+                )
+                self.logger.info(f"Model loaded successfully from {model_path}")
+            except Exception as e:
+                self.logger.error(f"Error initializing model: {str(e)}")
+                raise StockPredictorError(f"Failed to initialize model: {str(e)}")
             
+        except StockPredictorError:
+            # Re-raise StockPredictorError without wrapping
+            raise
         except Exception as e:
-            self.logger.error(f"Error loading model: {str(e)}")
+            # Wrap other unexpected errors
+            self.logger.error(f"Unexpected error loading model: {str(e)}")
             raise StockPredictorError(f"Failed to load model: {str(e)}")
     
     def predict(
