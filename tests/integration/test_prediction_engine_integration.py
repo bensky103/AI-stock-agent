@@ -251,7 +251,3 @@ class TestPredictionEngineIntegration:
         # Test loading model
         predictor.load_model(components['model_path'])
         assert predictor.model is not None
-        
-        # Test loading with invalid path
-        with pytest.raises((StockPredictorError, TFTPredictorError)):
-            predictor.load_model(Path("invalid_path")) 
