@@ -222,16 +222,14 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
             # Create resampler
             resampler = symbol_data.resample(interval)
             
-            # Create empty DataFrame with correct index
-            resampled = pd.DataFrame(index=resampler.indices.keys())
-            resampled.index.name = 'datetime'  # Set index name explicitly
-            
-            # Add each column with appropriate aggregation
-            resampled['open'] = resampler['open'].apply(lambda x: x.iloc[0] if not x.empty else np.nan)
-            resampled['high'] = resampler['high'].apply(lambda x: x.max() if not x.empty else np.nan)
-            resampled['low'] = resampler['low'].apply(lambda x: x.min() if not x.empty else np.nan)
-            resampled['close'] = resampler['close'].apply(lambda x: x.iloc[-1] if not x.empty else np.nan)
-            resampled['volume'] = resampler['volume'].apply(lambda x: x.sum() if not x.empty else np.nan)
+            # Use agg() with a dictionary of aggregation functions
+            resampled = resampler.agg({
+                'open': 'first',
+                'high': 'max',
+                'low': 'min',
+                'close': 'last',
+                'volume': 'sum'
+            })
             
             # Add symbol column and set multi-index
             resampled['symbol'] = symbol
