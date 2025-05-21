@@ -223,38 +223,25 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
             # Create resampler
             resampler = symbol_data.resample(interval)
             
-            # Define aggregation functions
-            agg_dict = {
-                'open': lambda x: x.iloc[0] if not x.empty else np.nan,
-                'high': lambda x: x.max() if not x.empty else np.nan,
-                'low': lambda x: x.min() if not x.empty else np.nan,
-                'close': lambda x: x.iloc[-1] if not x.empty else np.nan,
-                'volume': lambda x: x.sum() if not x.empty else np.nan
-            }
+            # Apply aggregation for each column separately to ensure we get a DataFrame
+            resampled = pd.DataFrame(index=resampler.groups.keys())
             
-            # Apply aggregation and ensure we get a DataFrame
-            resampled = resampler.agg(agg_dict)
-            
-            # Debug logging
-            logger.debug(f"After aggregation, columns: {resampled.columns}")
-            logger.debug(f"After aggregation, index: {resampled.index}")
-            
-            # The resampled data has datetime as index, convert to column
-            resampled = resampled.reset_index()
-            
-            # Debug logging
-            logger.debug(f"After reset_index, columns: {resampled.columns}")
-            logger.debug(f"After reset_index, first few rows:\n{resampled.head()}")
+            # Apply aggregations
+            resampled['open'] = resampler['open'].apply(lambda x: x.iloc[0] if not x.empty else np.nan)
+            resampled['high'] = resampler['high'].apply(lambda x: x.max() if not x.empty else np.nan)
+            resampled['low'] = resampler['low'].apply(lambda x: x.min() if not x.empty else np.nan)
+            resampled['close'] = resampler['close'].apply(lambda x: x.iloc[-1] if not x.empty else np.nan)
+            resampled['volume'] = resampler['volume'].apply(lambda x: x.sum() if not x.empty else np.nan)
             
             # Add symbol column
             resampled['symbol'] = symbol
             
+            # Reset index to make datetime a column
+            resampled = resampled.reset_index()
+            resampled = resampled.rename(columns={'index': 'datetime'})
+            
             # Set multi-index with datetime and symbol
             resampled = resampled.set_index(['datetime', 'symbol'])
-            
-            # Debug logging
-            logger.debug(f"After set_index, index names: {resampled.index.names}")
-            logger.debug(f"After set_index, first few rows:\n{resampled.head()}")
             
             # Filter out data points beyond original end date
             resampled = resampled[resampled.index.get_level_values('datetime') <= original_end_date]
@@ -269,10 +256,6 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
         
         # Reorder index levels to maintain structure
         result = result.reorder_levels(['symbol', 'datetime'])
-        
-        # Debug logging
-        logger.debug(f"Final result index names: {result.index.names}")
-        logger.debug(f"Final result first few rows:\n{result.head()}")
         
         return result.sort_index()
         
