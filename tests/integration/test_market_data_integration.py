@@ -8,6 +8,10 @@ from data_input.market_data_manager import MarketDataManager
 from data_input import market_utils
 import pytz
 import numpy as np
+import logging
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 class TestMarketDataIntegration:
     @pytest.fixture
@@ -137,6 +141,8 @@ class TestMarketDataIntegration:
         end_date = datetime.now(pytz.UTC) - timedelta(days=1)  # Use UTC and subtract one day
         start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks
         
+        logger.debug(f"Fetching data from {start_date} to {end_date}")
+
         # Fetch from both managers
         market_data = components['market_manager'].fetch_data(
             symbols='AAPL',
@@ -145,6 +151,10 @@ class TestMarketDataIntegration:
             resample_interval='1W'  # Explicitly request weekly data
         )
         
+        logger.debug(f"Market data shape: {market_data.shape}")
+        logger.debug(f"Market data index levels: {market_data.index.names}")
+        logger.debug(f"Market data first few dates: {market_data.index.get_level_values('datetime')[:5]}")
+
         enhanced_data = components['enhanced_manager'].get_market_data(
             symbols='AAPL',
             start_date=start_date,
@@ -152,6 +162,10 @@ class TestMarketDataIntegration:
             interval='1W'  # Use weekly data
         )
         
+        logger.debug(f"Enhanced data shape: {enhanced_data.shape}")
+        logger.debug(f"Enhanced data index levels: {enhanced_data.index.names}")
+        logger.debug(f"Enhanced data first few dates: {enhanced_data.index.get_level_values('datetime')[:5]}")
+
         # Verify data consistency
         assert isinstance(market_data, pd.DataFrame)
         assert isinstance(enhanced_data, pd.DataFrame)
@@ -159,25 +173,36 @@ class TestMarketDataIntegration:
         assert not enhanced_data.empty
         assert len(market_data) >= 8  # Ensure enough weekly data points
         assert len(enhanced_data) >= 8  # Ensure enough weekly data points
-        
+
         # Get dates and convert to UTC if needed
         market_dates = market_data.index.get_level_values('datetime')
         enhanced_dates = enhanced_data.index.get_level_values('datetime')
         
+        logger.debug(f"Market dates timezone: {market_dates.tz}")
+        logger.debug(f"Enhanced dates timezone: {enhanced_dates.tz}")
+        
         # Convert to UTC if not already in UTC
         if market_dates.tz is None:
+            logger.debug("Converting market dates from naive to UTC")
             market_dates = market_dates.tz_localize(pytz.UTC)
         elif market_dates.tz != pytz.UTC:
+            logger.debug(f"Converting market dates from {market_dates.tz} to UTC")
             market_dates = market_dates.tz_convert(pytz.UTC)
-        
+            
         if enhanced_dates.tz is None:
+            logger.debug("Converting enhanced dates from naive to UTC")
             enhanced_dates = enhanced_dates.tz_localize(pytz.UTC)
         elif enhanced_dates.tz != pytz.UTC:
+            logger.debug(f"Converting enhanced dates from {enhanced_dates.tz} to UTC")
             enhanced_dates = enhanced_dates.tz_convert(pytz.UTC)
 
         # Normalize timestamps to midnight UTC
+        logger.debug("Normalizing timestamps to midnight UTC")
         market_dates = pd.DatetimeIndex([d.replace(hour=0, minute=0, second=0, microsecond=0) for d in market_dates])
         enhanced_dates = pd.DatetimeIndex([d.replace(hour=0, minute=0, second=0, microsecond=0) for d in enhanced_dates])
+        
+        logger.debug(f"Normalized market dates first few: {market_dates[:5]}")
+        logger.debug(f"Normalized enhanced dates first few: {enhanced_dates[:5]}")
 
         # Compare dates
         assert market_dates.equals(enhanced_dates), "Date indices should match after normalization"
@@ -186,4 +211,6 @@ class TestMarketDataIntegration:
         for col in ['open', 'high', 'low', 'close', 'volume']:
             market_values = market_data[col].values
             enhanced_values = enhanced_data[col].values
+            logger.debug(f"Comparing {col} values - shapes: {market_values.shape} vs {enhanced_values.shape}")
+            logger.debug(f"First few {col} values - Market: {market_values[:5]} vs Enhanced: {enhanced_values[:5]}")
             np.testing.assert_array_almost_equal(market_values, enhanced_values, decimal=2) 
