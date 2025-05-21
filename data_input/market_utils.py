@@ -210,42 +210,26 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
     if 'symbol' not in df.index.names or 'datetime' not in df.index.names:
         raise MarketDataError("DataFrame must have 'symbol' and 'datetime' levels in index")
     
-    # Debug input data
-    logger.debug(f"Input DataFrame shape: {df.shape}")
-    logger.debug(f"Input DataFrame index names: {df.index.names}")
-    logger.debug(f"Input DataFrame columns: {df.columns.tolist()}")
-    logger.debug(f"Input DataFrame first few rows:\n{df.head()}")
-    
-    # Handle duplicate columns by keeping only the first occurrence
-    df = df.loc[:, ~df.columns.duplicated()]
-    logger.debug(f"Columns after removing duplicates: {df.columns.tolist()}")
-    
     # Get original end date for filtering
     original_end_date = pd.Timestamp(df.index.get_level_values('datetime').max())
-    logger.debug(f"Original end date: {original_end_date}")
     
     try:
         # Process each symbol separately
         resampled_dfs = []
         for symbol in df.index.get_level_values('symbol').unique():
-            logger.debug(f"\nProcessing symbol: {symbol}")
-            
-            # Get data for this symbol
+            # Get data for this symbol and ensure we have the right columns
             symbol_data = df.xs(symbol, level='symbol')
-            logger.debug(f"Symbol data shape: {symbol_data.shape}")
-            logger.debug(f"Symbol data index: {symbol_data.index}")
-            
+            if symbol_data.empty:
+                continue
+                
             # Create resampler
             resampler = symbol_data.resample(interval)
-            logger.debug(f"Resampler groups: {list(resampler.groups.keys())[:5]}...")  # Show first 5 groups
             
             # Apply aggregation for each column separately to ensure we get a DataFrame
             resampled = pd.DataFrame(index=resampler.groups.keys())
-            logger.debug(f"Empty resampled DataFrame index: {resampled.index[:5]}...")  # Show first 5 indices
             
             # Apply aggregations
             for col in ['open', 'high', 'low', 'close', 'volume']:
-                logger.debug(f"Processing column: {col}")
                 if col == 'open':
                     resampled[col] = resampler[col].apply(lambda x: x.iloc[0] if not x.empty else np.nan)
                 elif col == 'high':
@@ -256,26 +240,19 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
                     resampled[col] = resampler[col].apply(lambda x: x.iloc[-1] if not x.empty else np.nan)
                 elif col == 'volume':
                     resampled[col] = resampler[col].apply(lambda x: x.sum() if not x.empty else np.nan)
-                logger.debug(f"After {col} aggregation, sample values:\n{resampled[col].head()}")
             
             # Add symbol column
             resampled['symbol'] = symbol
-            logger.debug(f"After adding symbol, columns: {resampled.columns.tolist()}")
             
             # Reset index to make datetime a column
             resampled = resampled.reset_index()
             resampled = resampled.rename(columns={'index': 'datetime'})
-            logger.debug(f"After reset_index, columns: {resampled.columns.tolist()}")
-            logger.debug(f"After reset_index, datetime sample: {resampled['datetime'].head()}")
             
             # Set multi-index with datetime and symbol
             resampled = resampled.set_index(['datetime', 'symbol'])
-            logger.debug(f"After set_index, index names: {resampled.index.names}")
-            logger.debug(f"After set_index, index levels: {[level.name for level in resampled.index.levels]}")
             
             # Filter out data points beyond original end date
             resampled = resampled[resampled.index.get_level_values('datetime') <= original_end_date]
-            logger.debug(f"After filtering, shape: {resampled.shape}")
             
             resampled_dfs.append(resampled)
         
@@ -284,14 +261,9 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
         
         # Combine all resampled data
         result = pd.concat(resampled_dfs)
-        logger.debug(f"\nFinal result shape: {result.shape}")
-        logger.debug(f"Final result index names: {result.index.names}")
-        logger.debug(f"Final result columns: {result.columns.tolist()}")
-        logger.debug(f"Final result first few rows:\n{result.head()}")
         
         # Reorder index levels to maintain structure
         result = result.reorder_levels(['symbol', 'datetime'])
-        logger.debug(f"After reordering levels, index names: {result.index.names}")
         
         return result.sort_index()
         
