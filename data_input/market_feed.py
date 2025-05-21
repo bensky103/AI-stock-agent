@@ -353,7 +353,7 @@ class MarketFeed:
         cache_size: int = 1000,
         max_retries: int = 3,
         retry_delay: int = 1,
-        default_interval: str = '1W'  # Changed default to weekly
+        default_interval: str = '1d'  # Changed default to daily
     ):
         """Initialize the market feed.
         
@@ -362,7 +362,7 @@ class MarketFeed:
             cache_size: Maximum number of cached results
             max_retries: Maximum number of retry attempts
             retry_delay: Delay between retries in seconds
-            default_interval: Default data interval (defaults to weekly)
+            default_interval: Default data interval (defaults to daily)
         """
         self.config = self._load_config(config_path) if config_path else {}
         self.cache_size = cache_size
@@ -451,7 +451,7 @@ class MarketFeed:
             
             # Validate date range
             if end_date > datetime.now(pytz.UTC):
-                end_date = datetime.now(pytz.UTC) - timedelta(days=1)
+                raise ValueError("end_date cannot be in the future")
             if start_date >= end_date:
                 raise ValueError("Start date must be before end date")
             
@@ -473,6 +473,9 @@ class MarketFeed:
             # Ensure datetime is a column (yfinance returns it as index)
             if 'datetime' not in df.columns:
                 df = df.reset_index().rename(columns={df.index.name or 'index': 'datetime'})
+            
+            # Convert datetime to UTC and remove timezone info for consistency
+            df['datetime'] = pd.to_datetime(df['datetime']).dt.tz_localize(None)
             
             # Ensure column names are lowercase before setting multi-index
             df = _safe_lowercase_columns(df)
@@ -501,34 +504,7 @@ class MarketFeed:
                     df = resample_market_data(df, resample_interval)
                 except Exception as e:
                     logger.error(f"Error during resampling: {str(e)}")
-                    # If resampling fails, try to resample each symbol separately
-                    resampled_dfs = []
-                    for symbol in df.index.get_level_values('symbol').unique():
-                        symbol_data = df.xs(symbol, level='symbol')
-                        try:
-                            # For all intervals, use market open (14:30 UTC) as anchor point
-                            offset = pd.Timedelta(hours=14, minutes=30)
-                            resampler = symbol_data.resample(resample_interval, offset=offset)
-                            
-                            resampled = resampler.agg({
-                                'open': 'first',
-                                'high': 'max',
-                                'low': 'min',
-                                'close': 'last',
-                                'volume': 'sum'
-                            })
-                            resampled['symbol'] = symbol
-                            resampled = resampled.set_index('symbol', append=True)
-                            resampled_dfs.append(resampled)
-                        except Exception as e:
-                            logger.error(f"Error resampling {symbol}: {str(e)}")
-                            continue
-                    
-                    if not resampled_dfs:
-                        raise MarketDataError("Failed to resample any symbols")
-                    
-                    df = pd.concat(resampled_dfs)
-                    df = df.sort_index()
+                    raise MarketDataError(f"Error resampling data: {str(e)}")
             
             # Add technical indicators if requested
             if add_indicators:
@@ -539,6 +515,11 @@ class MarketFeed:
                             indicator_config = self.weekly_indicators
                         else:
                             indicator_config = self.config.get('market_data', {}).get('technical_indicators', {})
+                    
+                    # Convert to MultiIndex columns if needed
+                    if not isinstance(df.columns, pd.MultiIndex):
+                        df.columns = pd.MultiIndex.from_product([df.columns, ['']])
+                    
                     df = add_technical_indicators(df, indicator_config)
                 except Exception as e:
                     logger.error(f"Error adding technical indicators: {e}")
