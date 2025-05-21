@@ -146,6 +146,9 @@ class YFinanceSource:
             })
             logger.info(f"Final columns after renaming: {df.columns.tolist()}")
             
+            # Normalize timestamps to market open (14:30 UTC)
+            df.index = df.index.map(lambda x: x.replace(hour=14, minute=30, second=0, microsecond=0))
+            
             # Validate raw data immediately after fetching
             try:
                 validate_market_data(

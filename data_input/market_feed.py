@@ -589,6 +589,9 @@ class MarketFeed:
                 'Volume': 'volume'
             })
             
+            # Normalize timestamps to market open (14:30 UTC)
+            data.index = data.index.map(lambda x: x.replace(hour=14, minute=30, second=0, microsecond=0))
+            
             return data
             
         except Exception as e:
