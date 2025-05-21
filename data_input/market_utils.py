@@ -194,61 +194,70 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
     """Resample market data to a different interval.
     
     Args:
-        df: DataFrame with market data
-        interval: Target interval (e.g., '1W' for weekly)
+        df: DataFrame with market data (must have MultiIndex with 'symbol' and datetime)
+        interval: Target interval (e.g., '1W', '1M')
         
     Returns:
         Resampled DataFrame
+        
+    Raises:
+        MarketDataError: If resampling fails
     """
-    # Ensure we have a multi-index DataFrame
     if not isinstance(df.index, pd.MultiIndex):
-        raise ValueError("DataFrame must have a multi-index with 'symbol' and datetime levels")
+        raise MarketDataError("DataFrame must have MultiIndex with 'symbol' and datetime levels")
     
-    # Get the original end date from the input data
-    # Find the datetime level by looking for the one that's not 'symbol'
-    datetime_level = next(i for i, name in enumerate(df.index.names) if name != 'symbol')
+    if 'symbol' not in df.index.names or len(df.index.names) != 2:
+        raise MarketDataError("DataFrame must have 'symbol' and datetime levels in index")
+    
+    # Get the datetime level name
+    datetime_level = [name for name in df.index.names if name != 'symbol'][0]
+    
+    # Get original end date for filtering
     original_end_date = pd.Timestamp(df.index.get_level_values(datetime_level).max())
     
-    # Process each symbol separately
-    resampled_dfs = []
-    for symbol in df.index.get_level_values('symbol').unique():
-        # Get data for this symbol
-        symbol_data = df.xs(symbol, level='symbol')
+    try:
+        # Process each symbol separately
+        resampled_dfs = []
+        for symbol in df.index.get_level_values('symbol').unique():
+            # Get data for this symbol
+            symbol_data = df.xs(symbol, level='symbol')
+            
+            # Create resampler
+            resampler = symbol_data.resample(interval)
+            
+            # Create empty DataFrame with correct index
+            resampled = pd.DataFrame(index=resampler.indices.keys())
+            
+            # Add each column with appropriate aggregation
+            resampled['open'] = resampler['open'].apply(lambda x: x.iloc[0] if not x.empty else np.nan)
+            resampled['high'] = resampler['high'].apply(lambda x: x.max() if not x.empty else np.nan)
+            resampled['low'] = resampler['low'].apply(lambda x: x.min() if not x.empty else np.nan)
+            resampled['close'] = resampler['close'].apply(lambda x: x.iloc[-1] if not x.empty else np.nan)
+            resampled['volume'] = resampler['volume'].apply(lambda x: x.sum() if not x.empty else np.nan)
+            
+            # Add symbol column and set multi-index
+            resampled['symbol'] = symbol
+            resampled = resampled.set_index('symbol', append=True)
+            
+            # Filter out data points beyond original end date
+            resampled = resampled[resampled.index.get_level_values(datetime_level) <= original_end_date]
+            
+            resampled_dfs.append(resampled)
         
-        # Create resampler on the datetime index
-        resampler = symbol_data.resample(interval)
+        if not resampled_dfs:
+            raise MarketDataError("No data could be resampled")
         
-        # Use agg() with a dictionary of aggregation functions
-        resampled = resampler.agg({
-            'open': 'first',
-            'high': 'max',
-            'low': 'min',
-            'close': 'last',
-            'volume': 'sum'
-        })
+        # Combine all resampled data
+        result = pd.concat(resampled_dfs)
         
-        # Filter out data points beyond the original end date
-        resampled = resampled[resampled.index <= original_end_date]
+        # Reorder index levels to maintain structure
+        result = result.reorder_levels(['symbol', datetime_level])
         
-        # Add symbol back
-        resampled['symbol'] = symbol
-        resampled = resampled.set_index('symbol', append=True)
+        return result.sort_index()
         
-        # Reorder index levels to match input (symbol first, then datetime)
-        resampled = resampled.reorder_levels(['symbol', 0])
-        
-        resampled_dfs.append(resampled)
-    
-    # Combine all resampled DataFrames
-    result = pd.concat(resampled_dfs)
-    
-    # Sort index
-    result = result.sort_index()
-    
-    # Ensure index names are set correctly
-    result.index.names = ['symbol', 'datetime']
-    
-    return result
+    except Exception as e:
+        logger.error(f"Error during resampling: {str(e)}")
+        raise MarketDataError(f"Failed to resample data: {str(e)}")
 
 def calculate_returns(
     df: pd.DataFrame,

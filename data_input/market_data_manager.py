@@ -12,6 +12,7 @@ import time
 import os
 from .market_utils import validate_market_data, MarketDataError, resample_market_data
 import yfinance as yf
+import pytz
 
 # Ensure logs directory exists
 os.makedirs('logs', exist_ok=True)
@@ -238,17 +239,23 @@ class MarketDataManager:
         
         # Set default dates if not provided
         if start_date is None:
-            start_date = datetime.now() - timedelta(days=30)
+            start_date = datetime.now(pytz.UTC) - timedelta(days=30)
         if end_date is None:
-            end_date = datetime.now()
+            end_date = datetime.now(pytz.UTC) - timedelta(days=1)  # Use UTC and subtract one day
+        
+        # Convert to UTC if not already
+        if start_date.tzinfo is None:
+            start_date = pytz.UTC.localize(start_date)
+        if end_date.tzinfo is None:
+            end_date = pytz.UTC.localize(end_date)
         
         # Validate date range
         if end_date <= start_date:
             raise ValueError("end_date must be after start_date")
         
         # Validate future dates
-        if end_date > datetime.now():
-            raise ValueError("end_date cannot be in the future")
+        if end_date > datetime.now(pytz.UTC):
+            end_date = datetime.now(pytz.UTC) - timedelta(days=1)
         
         data_frames = []
         for symbol in symbols:
