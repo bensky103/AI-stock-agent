@@ -235,4 +235,53 @@ class MLHybridStrategy(TradingStrategy):
         signals['RSI'] = signals['rsi_14']
         signals['MACD'] = signals['macd']
         
-        return signals 
+        return signals
+
+    def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
+        """
+        Generate trading signals for a series of data points.
+    
+        Parameters
+        ----------
+        data : pd.DataFrame
+            Market data with technical indicators
+    
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame with signals and additional information
+        """
+        # Calculate technical indicators first
+        data_with_indicators = self.calculate_technical_signals(data)
+        
+        # Now validate the data with indicators
+        if not self.validate_data(data_with_indicators):
+            raise ValueError("Invalid data format")
+        
+        try:
+            # Initialize signals DataFrame
+            signals = pd.DataFrame(index=data_with_indicators.index)
+            signals['signal'] = 0  # Default to neutral
+            
+            # Generate signals for each data point
+            for idx, row in data_with_indicators.iterrows():
+                # Get ML prediction (placeholder for now)
+                prediction = row['close'] * 1.02  # 2% higher than current price
+                uncertainty = 0.1  # Placeholder uncertainty
+                
+                # Generate signal
+                position_type, signal_strength = self.generate_signal(
+                    data_with_indicators.loc[:idx],
+                    prediction,
+                    uncertainty
+                )
+                
+                # Convert position type to signal (-1, 0, 1)
+                signals.loc[idx, 'signal'] = position_type.value
+                signals.loc[idx, 'signal_strength'] = signal_strength
+            
+            return signals
+            
+        except Exception as e:
+            logger.error(f"Error generating signals: {str(e)}")
+            raise ValueError("Error generating signals") 
