@@ -1,0 +1,6 @@
+dropout: 0.1
+hidden_size: 64
+num_heads: 4
+num_layers: 2
+prediction_horizon: 1
+sequence_length: 20
