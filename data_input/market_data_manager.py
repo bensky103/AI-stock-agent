@@ -266,7 +266,7 @@ class MarketDataManager:
         
         # Validate future dates
         if end_date > datetime.now(pytz.UTC):
-            end_date = datetime.now(pytz.UTC) - timedelta(days=1)
+            raise ValueError("end_date cannot be in the future")
         
         data_frames = []
         for symbol in symbols:
