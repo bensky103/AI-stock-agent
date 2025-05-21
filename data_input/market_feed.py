@@ -480,18 +480,18 @@ class MarketFeed:
             # Ensure column names are lowercase before setting multi-index
             df = _safe_lowercase_columns(df)
             
-            # Set multi-index after converting column names
+            # Set multi-index with symbol and datetime
             df = df.set_index(['symbol', 'datetime'])
             
-            # Add symbol level to columns for each symbol
-            symbols = df.index.get_level_values('symbol').unique()
-            for symbol in symbols:
+            # Create a new DataFrame with MultiIndex columns
+            result_df = pd.DataFrame(index=df.index)
+            
+            # Add each column with its symbol level
+            for symbol in df.index.get_level_values('symbol').unique():
                 symbol_data = df.xs(symbol, level='symbol')
-                symbol_data.columns = pd.MultiIndex.from_product([symbol_data.columns, [symbol]])
-                if symbol == symbols[0]:
-                    result_df = symbol_data
-                else:
-                    result_df = pd.concat([result_df, symbol_data], axis=1)
+                for col in symbol_data.columns:
+                    result_df[(col, symbol)] = symbol_data[col]
+            
             df = result_df
             
             # Resample data if requested
