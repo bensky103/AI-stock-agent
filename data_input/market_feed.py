@@ -556,23 +556,14 @@ class MarketFeed:
         start_date: datetime,
         end_date: datetime
     ) -> Optional[pd.DataFrame]:
-        """Fetch market data for a single symbol.
-        
-        Args:
-            symbol: Stock symbol to fetch
-            start_date: Start date
-            end_date: End date
-            
-        Returns:
-            DataFrame with market data or None if fetch fails
-        """
+        """Fetch market data for a single symbol."""
         try:
-            # Fetch data from yfinance
-            data = yf.download(
-                symbol,
+            # Use Ticker.history() instead of download() for consistency
+            ticker = yf.Ticker(symbol)
+            data = ticker.history(
                 start=start_date,
                 end=end_date,
-                progress=False
+                auto_adjust=False
             )
             
             if data.empty:
@@ -593,15 +584,8 @@ class MarketFeed:
                 'Volume': 'volume'
             })
             
-            # Log timestamps before normalization
-            logger.info(f"Timestamps before normalization for {symbol} (first 3):")
-            logger.info(f"{data.index[:3]}")
-            
-            # Normalize timestamps to market open (14:30 UTC)
-            data.index = data.index.map(lambda x: x.replace(hour=14, minute=30, second=0, microsecond=0))
-            
-            # Log timestamps after normalization
-            logger.info(f"Timestamps after normalization for {symbol} (first 3):")
+            # Log final timestamps
+            logger.info(f"Final timestamps for {symbol} (first 3):")
             logger.info(f"{data.index[:3]}")
             
             return data

@@ -23,7 +23,7 @@ project/
 │   └── news_sentiment.py
 │
 ├── prediction_engine/
-│   ├── tft_predictor.py               # ← replaces lstm_predictor.py
+│   ├── tft_predictor.py           
 │   ├── sequence_preprocessor.py
 │   └── scaler_handler.py
 │
