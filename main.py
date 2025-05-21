@@ -9,7 +9,7 @@ from prediction_engine.enhanced_stock_predictor import EnhancedStockPredictor
 
 def main():
     """Main entry point for the stock prediction system."""
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.WARNING)
 
     # 1. Load configuration
     config = load_config()

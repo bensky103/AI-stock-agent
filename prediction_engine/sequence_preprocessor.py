@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 
 # Configure logging
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.WARNING)
 _handler = logging.StreamHandler()
 _formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 _handler.setFormatter(_formatter)

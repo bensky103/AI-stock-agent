@@ -28,6 +28,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Set yfinance logger to WARNING
+logging.getLogger('yfinance').setLevel(logging.WARNING)
+
 # Define what should be exported from this module
 __all__ = ['MarketDataManager', 'MarketDataError', 'YFinanceSource']
 

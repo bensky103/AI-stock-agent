@@ -13,7 +13,7 @@ import logging
 
 # Configure logging for tests
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
@@ -144,7 +144,7 @@ def mock_model():
 def test_logger():
     """Create test logger."""
     logger = logging.getLogger("test_trading")
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.WARNING)
     
     # Create logs directory if it doesn't exist
     log_dir = Path("logs")
