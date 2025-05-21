@@ -9,6 +9,7 @@ from decision_making.strategies.ml_hybrid_strategy import MLHybridStrategy
 from decision_making.strategies.position_manager import PositionManager
 from data_input.market_feed import MarketFeed
 from pathlib import Path
+import pytz
 
 class TestDecisionMakingIntegration:
     @pytest.fixture
@@ -47,7 +48,7 @@ class TestDecisionMakingIntegration:
         components = setup_decision_components
         
         # 1. Get market data - fetch 26 weeks for weekly data
-        end_date = datetime.now()
+        end_date = datetime.now(pytz.UTC) - timedelta(days=1)  # Use UTC and subtract one day
         start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks
         market_data = components['market_feed'].fetch_data(
             symbols='AAPL',
@@ -120,7 +121,7 @@ class TestDecisionMakingIntegration:
         components = setup_decision_components
         
         # Get market data - fetch 26 weeks for weekly data
-        end_date = datetime.now()
+        end_date = datetime.now(pytz.UTC) - timedelta(days=1)  # Use UTC and subtract one day
         start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks
         market_data = components['market_feed'].fetch_data(
             symbols='AAPL',
@@ -173,7 +174,7 @@ class TestDecisionMakingIntegration:
         components = setup_decision_components
         
         # Get market data - fetch 26 weeks for weekly data
-        end_date = datetime.now()
+        end_date = datetime.now(pytz.UTC) - timedelta(days=1)  # Use UTC and subtract one day
         start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks
         market_data = components['market_feed'].fetch_data(
             symbols='AAPL',

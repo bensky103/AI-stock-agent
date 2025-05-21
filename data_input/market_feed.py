@@ -440,13 +440,20 @@ class MarketFeed:
             
             # Set default dates if not provided
             if end_date is None:
-                end_date = datetime.now()
+                # Use UTC time and subtract one day to avoid future dates
+                end_date = datetime.now(pytz.UTC) - timedelta(days=1)
             if start_date is None:
                 start_date = end_date - timedelta(days=365)
             
-            # Convert to UTC
+            # Convert to UTC if not already
             start_date = self._to_utc(start_date)
             end_date = self._to_utc(end_date)
+            
+            # Validate date range
+            if end_date > datetime.now(pytz.UTC):
+                end_date = datetime.now(pytz.UTC) - timedelta(days=1)
+            if start_date >= end_date:
+                raise ValueError("Start date must be before end date")
             
             # Fetch data for each symbol
             all_data = []

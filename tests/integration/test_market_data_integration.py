@@ -42,7 +42,7 @@ class TestMarketDataIntegration:
         components = setup_market_components
         
         # 1. Fetch basic market data - fetch 26 weeks for weekly data
-        end_date = datetime.now()
+        end_date = datetime.now(pytz.UTC) - timedelta(days=1)  # Use UTC and subtract one day
         start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks
         market_data = components['market_manager'].fetch_data(
             symbols='AAPL',
@@ -71,7 +71,7 @@ class TestMarketDataIntegration:
         components = setup_market_components
         
         # Test fetching data for multiple symbols - fetch 26 weeks for weekly data
-        end_date = datetime.now()
+        end_date = datetime.now(pytz.UTC) - timedelta(days=1)  # Use UTC and subtract one day
         start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks
         symbols = ['AAPL', 'MSFT', 'GOOGL']
         
@@ -92,7 +92,7 @@ class TestMarketDataIntegration:
         components = setup_market_components
         
         # Get some market data first - fetch 26 weeks for weekly data
-        end_date = datetime.now()
+        end_date = datetime.now(pytz.UTC) - timedelta(days=1)  # Use UTC and subtract one day
         start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks
         market_data = components['market_manager'].fetch_data(
             symbols='AAPL',
@@ -116,16 +116,16 @@ class TestMarketDataIntegration:
         with pytest.raises(Exception):
             components['market_manager'].fetch_data(
                 symbols='INVALID_SYMBOL',
-                start_date=datetime.now() - timedelta(days=1),
-                end_date=datetime.now()
+                start_date=datetime.now(pytz.UTC) - timedelta(days=2),
+                end_date=datetime.now(pytz.UTC) - timedelta(days=1)
             )
         
         # Test invalid date range
         with pytest.raises(Exception):
             components['market_manager'].fetch_data(
                 symbols='AAPL',
-                start_date=datetime.now(),
-                end_date=datetime.now() - timedelta(days=1)
+                start_date=datetime.now(pytz.UTC) - timedelta(days=1),
+                end_date=datetime.now(pytz.UTC) - timedelta(days=2)
             )
     
     def test_data_consistency(self, setup_market_components):
@@ -133,7 +133,7 @@ class TestMarketDataIntegration:
         components = setup_market_components
         
         # Get data for a specific period - fetch 26 weeks for weekly data
-        end_date = datetime.now(pytz.UTC)  # Make end_date timezone-aware
+        end_date = datetime.now(pytz.UTC) - timedelta(days=1)  # Use UTC and subtract one day
         start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks
         
         # Fetch from both managers
