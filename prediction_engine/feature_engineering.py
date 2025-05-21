@@ -375,6 +375,27 @@ class FeatureEngineer:
         
         return market_features, sentiment_features
 
+    def generate_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Generate features from market data.
+        
+        Args:
+            df: DataFrame containing market data with columns ['Open', 'High', 'Low', 'Close', 'Volume']
+            
+        Returns:
+            DataFrame with generated features
+        """
+        # Convert column names to lowercase for consistency
+        df = df.copy()
+        df.columns = df.columns.str.lower()
+        
+        # Calculate technical indicators
+        features = self.calculate_technical_indicators(df)
+        
+        # Normalize features
+        features, _, _ = self.normalize_features(features)
+        
+        return features
+
 if __name__ == "__main__":
     # Example usage
     import yfinance as yf
