@@ -225,21 +225,22 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
             # Create resampler
             resampler = symbol_data.resample(interval)
             
-            # Apply aggregation for each column separately to ensure we get a DataFrame
+            # Create empty DataFrame for results
             resampled = pd.DataFrame(index=resampler.groups.keys())
             
             # Apply aggregations
             for col in ['open', 'high', 'low', 'close', 'volume']:
+                # Get the resampled series for this column
                 if col == 'open':
-                    resampled[col] = resampler[col].apply(lambda x: x.iloc[0] if not x.empty else np.nan)
+                    resampled[col] = resampler[col].first()
                 elif col == 'high':
-                    resampled[col] = resampler[col].apply(lambda x: x.max() if not x.empty else np.nan)
+                    resampled[col] = resampler[col].max()
                 elif col == 'low':
-                    resampled[col] = resampler[col].apply(lambda x: x.min() if not x.empty else np.nan)
+                    resampled[col] = resampler[col].min()
                 elif col == 'close':
-                    resampled[col] = resampler[col].apply(lambda x: x.iloc[-1] if not x.empty else np.nan)
+                    resampled[col] = resampler[col].last()
                 elif col == 'volume':
-                    resampled[col] = resampler[col].apply(lambda x: x.sum() if not x.empty else np.nan)
+                    resampled[col] = resampler[col].sum()
             
             # Add symbol column
             resampled['symbol'] = symbol
