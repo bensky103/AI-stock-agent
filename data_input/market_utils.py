@@ -222,15 +222,10 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
             if symbol_data.empty:
                 continue
             
-            # For weekly data, use market open (14:30 UTC) as anchor point
-            if interval == '1W':
-                # Create a custom offset to anchor at market open
-                offset = pd.Timedelta(hours=14, minutes=30)
-                # Create resampler with custom offset
-                resampler = symbol_data.resample(interval, offset=offset)
-            else:
-                # For other intervals, use default resampling
-                resampler = symbol_data.resample(interval)
+            # For all intervals, use market open (14:30 UTC) as anchor point
+            offset = pd.Timedelta(hours=14, minutes=30)
+            # Create resampler with custom offset
+            resampler = symbol_data.resample(interval, offset=offset)
             
             # Create empty DataFrame for results
             resampled = pd.DataFrame(index=resampler.groups.keys())

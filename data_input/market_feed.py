@@ -506,12 +506,9 @@ class MarketFeed:
                     for symbol in df.index.get_level_values('symbol').unique():
                         symbol_data = df.xs(symbol, level='symbol')
                         try:
-                            # For weekly data, use market open (14:30 UTC) as anchor point
-                            if resample_interval == '1W':
-                                offset = pd.Timedelta(hours=14, minutes=30)
-                                resampler = symbol_data.resample(resample_interval, offset=offset)
-                            else:
-                                resampler = symbol_data.resample(resample_interval)
+                            # For all intervals, use market open (14:30 UTC) as anchor point
+                            offset = pd.Timedelta(hours=14, minutes=30)
+                            resampler = symbol_data.resample(resample_interval, offset=offset)
                             
                             resampled = resampler.agg({
                                 'open': 'first',
