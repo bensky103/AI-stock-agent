@@ -274,14 +274,16 @@ class MLHybridStrategy(TradingStrategy):
             raise ValueError("Invalid data format")
         
         try:
-            # Initialize signals DataFrame
-            signals = pd.DataFrame(index=data_with_indicators.index)
+            # Initialize signals DataFrame with all original data
+            signals = data_with_indicators.copy()
             signals['signal'] = 0  # Default to neutral
+            signals['signal_strength'] = 0.0
             
             # Generate signals for each data point
             for idx, row in data_with_indicators.iterrows():
                 # Get ML prediction (placeholder for now)
-                prediction = row['close'] * 1.02  # 2% higher than current price
+                price_col = 'close' if 'close' in row else 'Close'
+                prediction = row[price_col] * 1.02  # 2% higher than current price
                 uncertainty = 0.1  # Placeholder uncertainty
                 
                 # Generate signal
