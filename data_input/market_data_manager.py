@@ -310,7 +310,9 @@ class MarketDataManager:
                 df['symbol'] = symbol
                 df = df.reset_index()
                 df = df.rename(columns={'Date': 'datetime'})
+                # Ensure datetime column is properly named and set as index
                 df = df.set_index(['symbol', 'datetime'])
+                df.index.names = ['symbol', 'datetime']  # Explicitly set index names
                 
                 data_frames.append(df)
                 logger.info(f"Successfully fetched data for {symbol}")

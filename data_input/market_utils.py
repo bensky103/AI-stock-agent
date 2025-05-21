@@ -206,14 +206,11 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
     if not isinstance(df.index, pd.MultiIndex):
         raise MarketDataError("DataFrame must have MultiIndex with 'symbol' and datetime levels")
     
-    if 'symbol' not in df.index.names or len(df.index.names) != 2:
-        raise MarketDataError("DataFrame must have 'symbol' and datetime levels in index")
-    
-    # Get the datetime level name
-    datetime_level = [name for name in df.index.names if name != 'symbol'][0]
+    if 'symbol' not in df.index.names or 'datetime' not in df.index.names:
+        raise MarketDataError("DataFrame must have 'symbol' and 'datetime' levels in index")
     
     # Get original end date for filtering
-    original_end_date = pd.Timestamp(df.index.get_level_values(datetime_level).max())
+    original_end_date = pd.Timestamp(df.index.get_level_values('datetime').max())
     
     try:
         # Process each symbol separately
@@ -227,6 +224,7 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
             
             # Create empty DataFrame with correct index
             resampled = pd.DataFrame(index=resampler.indices.keys())
+            resampled.index.name = 'datetime'  # Set index name explicitly
             
             # Add each column with appropriate aggregation
             resampled['open'] = resampler['open'].apply(lambda x: x.iloc[0] if not x.empty else np.nan)
@@ -238,9 +236,10 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
             # Add symbol column and set multi-index
             resampled['symbol'] = symbol
             resampled = resampled.set_index('symbol', append=True)
+            resampled.index.names = ['datetime', 'symbol']  # Set index names explicitly
             
             # Filter out data points beyond original end date
-            resampled = resampled[resampled.index.get_level_values(datetime_level) <= original_end_date]
+            resampled = resampled[resampled.index.get_level_values('datetime') <= original_end_date]
             
             resampled_dfs.append(resampled)
         
@@ -251,7 +250,7 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
         result = pd.concat(resampled_dfs)
         
         # Reorder index levels to maintain structure
-        result = result.reorder_levels(['symbol', datetime_level])
+        result = result.reorder_levels(['symbol', 'datetime'])
         
         return result.sort_index()
         
