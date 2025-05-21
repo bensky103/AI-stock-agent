@@ -200,23 +200,53 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
     Returns:
         Resampled DataFrame
     """
-    # Define aggregation rules for each column using pandas functions
+    # Ensure we have a multi-index DataFrame
+    if not isinstance(df.index, pd.MultiIndex):
+        raise ValueError("DataFrame must have a multi-index with 'symbol' and datetime levels")
+    
+    # Get the symbol level name
+    symbol_level = df.index.names[0] if df.index.names[0] == 'symbol' else df.index.names[1]
+    datetime_level = df.index.names[1] if df.index.names[0] == 'symbol' else df.index.names[0]
+    
+    # Define aggregation rules for each column
     agg_dict = {
-        'open': pd.NamedAgg(column='open', aggfunc='first'),
-        'high': pd.NamedAgg(column='high', aggfunc='max'),
-        'low': pd.NamedAgg(column='low', aggfunc='min'),
-        'close': pd.NamedAgg(column='close', aggfunc='last'),
-        'volume': pd.NamedAgg(column='volume', aggfunc='sum'),
-        'dividends': pd.NamedAgg(column='dividends', aggfunc='sum'),
-        'stock splits': pd.NamedAgg(column='stock splits', aggfunc='sum')
+        'open': 'first',
+        'high': 'max',
+        'low': 'min',
+        'close': 'last',
+        'volume': 'sum',
+        'dividends': 'sum',
+        'stock splits': 'sum'
     }
     
-    # Group by symbol and resample
-    resampled = df.groupby(level=0).apply(
-        lambda x: x.droplevel(0).resample(interval).agg(**agg_dict)
-    )
+    # Process each symbol separately
+    resampled_dfs = []
+    for symbol in df.index.get_level_values(symbol_level).unique():
+        # Get data for this symbol
+        symbol_data = df.xs(symbol, level=symbol_level)
+        
+        # Resample the data
+        resampled = symbol_data.resample(interval).agg(agg_dict)
+        
+        # Add symbol back
+        resampled[symbol_level] = symbol
+        resampled = resampled.set_index(symbol_level, append=True)
+        
+        # Reorder index levels to match input
+        if df.index.names[0] == 'symbol':
+            resampled = resampled.reorder_levels([symbol_level, datetime_level])
+        else:
+            resampled = resampled.reorder_levels([datetime_level, symbol_level])
+        
+        resampled_dfs.append(resampled)
     
-    return resampled
+    # Combine all resampled DataFrames
+    result = pd.concat(resampled_dfs)
+    
+    # Sort index
+    result = result.sort_index()
+    
+    return result
 
 def calculate_returns(
     df: pd.DataFrame,

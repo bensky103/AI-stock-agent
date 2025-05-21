@@ -103,19 +103,38 @@ class YFinanceSource:
         # Use yfinance to fetch real data
         ticker = yf.Ticker(symbol)
         try:
+            # Fetch data with auto_adjust=False to get raw data
             df = ticker.history(start=start_date, end=end_date, auto_adjust=False)
             
             if df.empty:
                 raise MarketDataError(f"No data available for {symbol}")
             
-            # Ensure we have all required columns
-            required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
-            missing_cols = [col for col in required_cols if col not in df.columns]
+            # Convert column names to lowercase for consistent handling
+            df.columns = df.columns.str.lower()
+            
+            # Map required columns (case-insensitive)
+            required_cols = {
+                'open': ['open'],
+                'high': ['high'],
+                'low': ['low'],
+                'close': ['close'],
+                'volume': ['volume']
+            }
+            
+            # Check for required columns (case-insensitive)
+            missing_cols = []
+            for req_col, possible_names in required_cols.items():
+                if not any(name in df.columns for name in possible_names):
+                    missing_cols.append(req_col)
+            
             if missing_cols:
                 raise MarketDataError(f"Missing required columns from yfinance: {missing_cols}")
             
-            # Convert column names to lowercase
-            df.columns = df.columns.str.lower()
+            # Ensure we have all required columns with correct names
+            df = df.rename(columns={
+                col: req_col for req_col, possible_names in required_cols.items()
+                for col in possible_names if col in df.columns
+            })
             
             # Validate raw data immediately after fetching
             try:
