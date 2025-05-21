@@ -278,9 +278,13 @@ def test_market_feed_data_validation(sample_config, sample_market_data):
 @patch('yfinance.Ticker')
 def test_market_feed_integration(mock_ticker, sample_config, sample_market_data):
     """Test market feed integration with multiple symbols and indicators."""
-    # Create separate data for each symbol
+    # Create separate data for each symbol and ensure lowercase column names
     aapl_data = sample_market_data.copy()
     msft_data = sample_market_data.copy()
+    
+    # Convert column names to lowercase for both datasets
+    aapl_data.columns = [col.lower() for col in aapl_data.columns]
+    msft_data.columns = [col.lower() for col in msft_data.columns]
     
     # Mock Ticker.history to return different data for each symbol
     def mock_history_side_effect(*args, **kwargs):
