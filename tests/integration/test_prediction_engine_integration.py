@@ -17,27 +17,31 @@ class TestPredictionEngineIntegration:
         """Set up prediction components for testing"""
         # Create model directory and config
         model_path = Path("colab_training/tft_model")
+        model_path.mkdir(parents=True, exist_ok=True)  # Ensure directory exists
         config_path = model_path / "config.yaml"
         
         # Create model config if it doesn't exist
-        if not config_path.exists():
-            model_config = {
-                "model_config": {
-                    "hidden_layer_size": 128,
-                    "attention_head_size": 8,
-                    "dropout_rate": 0.1,
-                    "max_gradient_norm": 0.01,
-                    "learning_rate": 0.0005,
-                    "num_encoder_steps": 30,
-                    "num_steps": 5
-                },
-                "best_val_loss": float('inf'),
-                "best_epoch": 0,
-                "training_history": []
-            }
-            config_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(config_path, 'w') as f:
-                yaml.dump(model_config, f)
+        model_config = {
+            "model_config": {
+                "hidden_layer_size": 128,
+                "attention_head_size": 8,
+                "dropout_rate": 0.1,
+                "max_gradient_norm": 0.01,
+                "learning_rate": 0.0005,
+                "num_encoder_steps": 30,
+                "num_steps": 5
+            },
+            "best_val_loss": float('inf'),
+            "best_epoch": 0,
+            "training_history": []
+        }
+        
+        # Always write the config file to ensure it exists
+        with open(config_path, 'w') as f:
+            yaml.dump(model_config, f)
+        
+        # Verify the config file exists
+        assert config_path.exists(), f"Config file was not created at {config_path}"
         
         # Initialize components with correct arguments
         feature_engineer = FeatureEngineer(
@@ -128,9 +132,9 @@ class TestPredictionEngineIntegration:
         assert 'rsi_14' in tech_indicators.columns
         assert 'macd' in tech_indicators.columns
         assert 'sma_20' in tech_indicators.columns
-        assert 'ema_12' in tech_indicators.columns
-        assert 'bollinger_upper' in tech_indicators.columns
-        assert 'bollinger_lower' in tech_indicators.columns
+        assert 'ema_20' in tech_indicators.columns
+        assert 'bb_upper' in tech_indicators.columns
+        assert 'bb_lower' in tech_indicators.columns
     
     def test_scaler_operations(self, setup_prediction_components, sample_market_data):
         """Test scaler operations"""
