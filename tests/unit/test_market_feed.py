@@ -262,7 +262,7 @@ def test_market_feed_fetch_data(mock_download, sample_config, sample_market_data
     )
     
     assert isinstance(df, pd.DataFrame)
-    assert ('AAPL', pd.Timestamp('2024-01-01')) in df.index
+    assert ('AAPL', pd.Timestamp('2024-01-02')) in df.index
     mock_download.assert_called_once()
 
 def test_market_feed_data_validation(sample_config, sample_market_data):
@@ -302,8 +302,8 @@ def test_market_feed_integration(mock_download, sample_config, sample_market_dat
     
     assert isinstance(df, pd.DataFrame)
     assert not df.empty
-    assert ('AAPL', pd.Timestamp('2024-01-01')) in df.index
-    assert ('MSFT', pd.Timestamp('2024-01-01')) in df.index
+    assert ('AAPL', pd.Timestamp('2024-01-02')) in df.index
+    assert ('MSFT', pd.Timestamp('2024-01-02')) in df.index
     assert ('close', 'AAPL') in df.columns
     assert ('close', 'MSFT') in df.columns
     assert ('sma_20', 'AAPL') in df.columns
