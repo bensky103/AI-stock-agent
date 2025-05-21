@@ -245,5 +245,5 @@ class TestPredictionEngineIntegration:
         assert predictor.model is not None
         
         # Test loading with invalid path
-        with pytest.raises(StockPredictorError):
+        with pytest.raises(StockPredictorError, match="Model path does not exist: invalid_path"):
             predictor.load_model(Path("invalid_path")) 
