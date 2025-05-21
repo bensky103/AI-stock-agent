@@ -233,12 +233,17 @@ def resample_market_data(df: pd.DataFrame, interval: str) -> pd.DataFrame:
             }
             
             # Apply aggregation and ensure we get a DataFrame
-            resampled = pd.DataFrame(resampler.agg(agg_dict))
+            resampled = resampler.agg(agg_dict)
             
-            # Add symbol column and set multi-index
+            # The resampled data has datetime as index, convert to column
+            resampled = resampled.reset_index()
+            
+            # Add symbol column
             resampled['symbol'] = symbol
-            resampled = resampled.reset_index()  # Reset index to make datetime a column
-            resampled = resampled.set_index(['datetime', 'symbol'])  # Set multi-index
+            
+            # Set multi-index with datetime and symbol
+            resampled = resampled.set_index(['index', 'symbol'])
+            resampled.index.names = ['datetime', 'symbol']  # Rename index levels
             
             # Filter out data points beyond original end date
             resampled = resampled[resampled.index.get_level_values('datetime') <= original_end_date]
