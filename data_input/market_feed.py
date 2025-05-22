@@ -485,16 +485,18 @@ class MarketFeed:
             # Create a new DataFrame with MultiIndex columns
             result_df = pd.DataFrame(index=df.index)
             
-            # Map the column names to our standard format
+            # Map the column names to our standard format, handling both cases
             col_map = {
                 'open': 'open',
                 'high': 'high',
                 'low': 'low',
                 'close': 'close',
                 'adj close': 'adj_close',
+                'adj_close': 'adj_close',  # Handle both formats
                 'volume': 'volume',
                 'dividends': 'dividends',
-                'stock splits': 'stock_splits'
+                'stock splits': 'stock_splits',
+                'stock_splits': 'stock_splits'  # Handle both formats
             }
             
             # Add each column with its symbol level
@@ -637,15 +639,22 @@ class MarketFeed:
             logger.info(f"Index type: {type(data.index)}")
             logger.info(f"First few timestamps: {data.index[:3]}")
             
-            # Standardize column names
-            data = data.rename(columns={
+            # Standardize column names - handle both formats
+            col_map = {
                 'Adj Close': 'adj_close',
+                'Adj_Close': 'adj_close',
                 'Open': 'open',
                 'High': 'high',
                 'Low': 'low',
                 'Close': 'close',
-                'Volume': 'volume'
-            })
+                'Volume': 'volume',
+                'Dividends': 'dividends',
+                'Stock Splits': 'stock_splits',
+                'Stock_Splits': 'stock_splits'
+            }
+            
+            # Rename columns using the mapping
+            data = data.rename(columns=col_map)
             
             # Ensure the index is timezone-naive
             if data.index.tz is not None:
