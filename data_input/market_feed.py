@@ -511,7 +511,8 @@ class MarketFeed:
                     col_lower = col.lower()
                     if col_lower in col_map:
                         target_col = col_map[col_lower]
-                        result_df[(target_col, symbol)] = symbol_data[col]
+                        # Copy the data directly from the source column
+                        result_df[(target_col, symbol)] = symbol_data[col].values
             
             df = result_df
             
@@ -536,6 +537,9 @@ class MarketFeed:
                         logger.error(f"Data for {symbol} {col}:")
                         logger.error(f"Shape: {df[col_key].shape}")
                         logger.error(f"Sample values: {df[col_key].head()}")
+                        logger.error(f"Original data for {symbol}:")
+                        logger.error(f"Columns: {symbol_data.columns.tolist()}")
+                        logger.error(f"Sample data:\n{symbol_data.head()}")
                         raise MarketDataError(f"All values are NaN for {col} in {symbol}")
             
             # Resample data if requested
@@ -638,6 +642,7 @@ class MarketFeed:
             logger.info(f"Columns: {data.columns.tolist()}")
             logger.info(f"Index type: {type(data.index)}")
             logger.info(f"First few timestamps: {data.index[:3]}")
+            logger.info(f"Sample data:\n{data.head()}")
             
             # Standardize column names - handle both formats
             col_map = {
@@ -653,32 +658,44 @@ class MarketFeed:
                 'Stock_Splits': 'stock_splits'
             }
             
-            # Rename columns using the mapping
-            data = data.rename(columns=col_map)
+            # Create a new DataFrame with standardized column names
+            processed_data = pd.DataFrame(index=data.index)
+            
+            # Map and copy each column
+            for col in data.columns:
+                col_lower = col.lower()
+                if col in col_map:
+                    target_col = col_map[col]
+                    processed_data[target_col] = data[col].values
+                elif col_lower in [v.lower() for v in col_map.values()]:
+                    # If the column is already in the target format, use it directly
+                    processed_data[col_lower] = data[col].values
             
             # Ensure the index is timezone-naive
-            if data.index.tz is not None:
-                data.index = data.index.tz_localize(None)
+            if processed_data.index.tz is not None:
+                processed_data.index = processed_data.index.tz_localize(None)
             
             # Log the processed data info
             logger.info(f"Processed data info for {symbol}:")
-            logger.info(f"First few timestamps after processing: {data.index[:3]}")
-            logger.info(f"Sample data:\n{data.head()}")
+            logger.info(f"First few timestamps after processing: {processed_data.index[:3]}")
+            logger.info(f"Sample data:\n{processed_data.head()}")
             
             # Verify we have the required columns
             required_cols = ['open', 'high', 'low', 'close', 'volume']
-            missing_cols = [col for col in required_cols if col not in data.columns]
+            missing_cols = [col for col in required_cols if col not in processed_data.columns]
             if missing_cols:
                 logger.error(f"Missing required columns for {symbol}: {missing_cols}")
+                logger.error(f"Available columns: {processed_data.columns.tolist()}")
                 return None
             
             # Verify we have actual data
             for col in required_cols:
-                if data[col].isna().all():
+                if processed_data[col].isna().all():
                     logger.error(f"All values are NaN for {col} in {symbol}")
+                    logger.error(f"Original data for {col}:\n{data[col].head()}")
                     return None
             
-            return data
+            return processed_data
             
         except Exception as e:
             logger.error(f"Error fetching data for {symbol}: {str(e)}")
