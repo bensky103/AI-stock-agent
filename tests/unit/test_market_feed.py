@@ -275,59 +275,21 @@ def test_market_feed_data_validation(sample_config, sample_market_data):
         validate_market_data(sample_market_data)
 
 # Integration tests
-@patch('yfinance.Ticker')
-def test_market_feed_integration(mock_ticker, sample_config, sample_market_data):
-    """Test market feed integration with multiple symbols and indicators."""
-    # Create separate data for each symbol
-    aapl_data = sample_market_data.copy()
-    msft_data = sample_market_data.copy()
-    
-    # Ensure both datasets have the exact same structure as yfinance output
-    for df in [aapl_data, msft_data]:
-        # First ensure we have the exact column names from yfinance
-        df.columns = ['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']
-        df.index.name = 'Date'
-        
-        # Verify the data is valid before mocking
-        assert not df['Open'].isna().all(), "Open prices should not be all NaN"
-        assert not df['High'].isna().all(), "High prices should not be all NaN"
-        assert not df['Low'].isna().all(), "Low prices should not be all NaN"
-        assert not df['Close'].isna().all(), "Close prices should not be all NaN"
-        assert not df['Volume'].isna().all(), "Volume should not be all NaN"
-    
-    # Create mock Ticker instances for each symbol
-    mock_aapl = MagicMock()
-    mock_msft = MagicMock()
-    
-    # Set up the history method to return the appropriate data
-    def mock_history_side_effect(*args, **kwargs):
-        # Get the symbol from the mock Ticker instance
-        if mock_ticker.call_args[0][0] == 'AAPL':
-            return aapl_data.copy()
-        elif mock_ticker.call_args[0][0] == 'MSFT':
-            return msft_data.copy()
-        return pd.DataFrame()
-    
-    # Set up the mock to return different Ticker instances for each symbol
-    def mock_ticker_side_effect(symbol, *args, **kwargs):
-        if symbol == 'AAPL':
-            mock_aapl.history.side_effect = mock_history_side_effect
-            return mock_aapl
-        elif symbol == 'MSFT':
-            mock_msft.history.side_effect = mock_history_side_effect
-            return mock_msft
-        return MagicMock()
-    
-    mock_ticker.side_effect = mock_ticker_side_effect
-    
+def test_market_feed_integration(sample_config):
+    """Test market feed integration with multiple symbols and indicators using real yfinance data."""
     feed = MarketFeed(config_path=sample_config)
+    
+    # Use a fixed date range that we know has data
+    # Using a recent date range to ensure data availability
+    end_date = datetime.now() - timedelta(days=1)  # Yesterday
+    start_date = end_date - timedelta(days=30)  # Last 30 days
     
     # Test data fetching with multiple symbols
     symbols = ['AAPL', 'MSFT']
     df = feed.fetch_data(
         symbols=symbols,
-        start_date='2024-01-02',
-        end_date='2024-01-31',
+        start_date=start_date,
+        end_date=end_date,
         add_indicators=True
     )
     
@@ -335,37 +297,40 @@ def test_market_feed_integration(mock_ticker, sample_config, sample_market_data)
     assert isinstance(df, pd.DataFrame)
     assert not df.empty
     
-    # Check index structure
-    assert ('AAPL', pd.Timestamp('2024-01-02')) in df.index
-    assert ('MSFT', pd.Timestamp('2024-01-02')) in df.index
+    # Check that we have data for both symbols
+    assert len(df.index.get_level_values('symbol').unique()) == 2
+    assert 'AAPL' in df.index.get_level_values('symbol')
+    assert 'MSFT' in df.index.get_level_values('symbol')
     
     # Check basic columns
-    assert ('open', 'AAPL') in df.columns
-    assert ('open', 'MSFT') in df.columns
-    assert ('high', 'AAPL') in df.columns
-    assert ('high', 'MSFT') in df.columns
-    assert ('low', 'AAPL') in df.columns
-    assert ('low', 'MSFT') in df.columns
-    assert ('close', 'AAPL') in df.columns
-    assert ('close', 'MSFT') in df.columns
-    assert ('volume', 'AAPL') in df.columns
-    assert ('volume', 'MSFT') in df.columns
+    required_columns = ['open', 'high', 'low', 'close', 'volume']
+    for symbol in symbols:
+        for col in required_columns:
+            assert (col, symbol) in df.columns, f"Missing {col} column for {symbol}"
+            # Verify we have actual data
+            symbol_data = df.xs(symbol, level='symbol')
+            assert not symbol_data[(col, symbol)].isna().all(), f"All values are NaN for {col} in {symbol}"
+            assert len(symbol_data) > 0, f"No data rows for {symbol}"
     
     # Check technical indicators
-    assert ('sma_20', 'AAPL') in df.columns
-    assert ('sma_20', 'MSFT') in df.columns
-    assert ('rsi', 'AAPL') in df.columns
-    assert ('rsi', 'MSFT') in df.columns
+    indicator_columns = ['sma_20', 'rsi']
+    for symbol in symbols:
+        for col in indicator_columns:
+            assert (col, symbol) in df.columns, f"Missing {col} indicator for {symbol}"
+            # Verify indicators are calculated
+            symbol_data = df.xs(symbol, level='symbol')
+            assert not symbol_data[(col, symbol)].isna().all(), f"All values are NaN for {col} in {symbol}"
     
-    # Verify data integrity
-    for symbol in ['AAPL', 'MSFT']:
+    # Verify price relationships
+    for symbol in symbols:
         symbol_data = df.xs(symbol, level='symbol')
-        assert not symbol_data.empty
-        assert not symbol_data[('open', symbol)].isna().all(), f"Open prices for {symbol} should not be all NaN"
-        assert not symbol_data[('high', symbol)].isna().all(), f"High prices for {symbol} should not be all NaN"
-        assert not symbol_data[('low', symbol)].isna().all(), f"Low prices for {symbol} should not be all NaN"
-        assert not symbol_data[('close', symbol)].isna().all(), f"Close prices for {symbol} should not be all NaN"
-        assert not symbol_data[('volume', symbol)].isna().all(), f"Volume for {symbol} should not be all NaN"
-        assert not symbol_data[('sma_20', symbol)].isna().all(), f"SMA20 for {symbol} should not be all NaN"
-        assert not symbol_data[('rsi', symbol)].isna().all(), f"RSI for {symbol} should not be all NaN"
+        # High should be highest
+        assert (symbol_data[('high', symbol)] >= symbol_data[('low', symbol)]).all(), f"High prices not always >= Low prices for {symbol}"
+        assert (symbol_data[('high', symbol)] >= symbol_data[('open', symbol)]).all(), f"High prices not always >= Open prices for {symbol}"
+        assert (symbol_data[('high', symbol)] >= symbol_data[('close', symbol)]).all(), f"High prices not always >= Close prices for {symbol}"
+        # Low should be lowest
+        assert (symbol_data[('low', symbol)] <= symbol_data[('open', symbol)]).all(), f"Low prices not always <= Open prices for {symbol}"
+        assert (symbol_data[('low', symbol)] <= symbol_data[('close', symbol)]).all(), f"Low prices not always <= Close prices for {symbol}"
+        # Volume should be positive
+        assert (symbol_data[('volume', symbol)] >= 0).all(), f"Negative volume found for {symbol}"
 
