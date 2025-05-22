@@ -45,7 +45,8 @@ class TestDataPipelineIntegration:
         pipeline = setup_pipeline
         
         # 1. Fetch market data - fetch 26 weeks to ensure enough weekly data points
-        end_date = datetime.now() - timedelta(days=1)  # Use yesterday's date
+        current_time = datetime.now()
+        end_date = current_time.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)  # Use yesterday's date
         start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks for weekly data
         market_data = pipeline['market_manager'].fetch_data(
             symbols='AAPL',
@@ -80,7 +81,8 @@ class TestDataPipelineIntegration:
         pipeline = setup_pipeline
         
         # 1. Fetch market data - fetch 26 weeks for weekly data
-        end_date = datetime.now() - timedelta(days=1)  # Use yesterday's date
+        current_time = datetime.now()
+        end_date = current_time.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)  # Use yesterday's date
         start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks
         market_data = pipeline['market_manager'].fetch_data(
             symbols='AAPL',
@@ -111,18 +113,23 @@ class TestDataPipelineIntegration:
         
         # Test with invalid symbol
         with pytest.raises(Exception):
+            current_time = datetime.now()
+            yesterday = current_time.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+            day_before_yesterday = yesterday - timedelta(days=1)
             pipeline['market_manager'].fetch_data(  # Changed from fetch_historical_data to fetch_data
                 symbols='INVALID_SYMBOL',  # Changed from symbol to symbols
-                start_date=datetime.now() - timedelta(days=1),
-                end_date=datetime.now()
+                start_date=day_before_yesterday,
+                end_date=yesterday
             )
         
         # Test with invalid date range
         with pytest.raises(Exception):
+            current_time = datetime.now()
+            yesterday = current_time.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
             pipeline['market_manager'].fetch_data(  # Changed from fetch_historical_data to fetch_data
                 symbols='AAPL',  # Changed from symbol to symbols
-                start_date=datetime.now(),
-                end_date=datetime.now() - timedelta(days=1)  # End date before start date
+                start_date=yesterday,
+                end_date=yesterday - timedelta(days=1)  # End date before start date
             )
         
         # Test with empty market data
@@ -136,7 +143,8 @@ class TestDataPipelineIntegration:
         
         # 1. Get market data - fetch 26 weeks for weekly data
         # Use yesterday's date to ensure we're working with historical data
-        end_date = (datetime.now() - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        current_time = datetime.now()
+        end_date = current_time.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
         start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks
         
         # Log the dates for debugging
