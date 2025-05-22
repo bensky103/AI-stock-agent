@@ -86,6 +86,7 @@ class EnhancedStockPredictor:
         self.device = device
         self.model_type = model_type
         self.model = None  # Will be initialized when loading a model
+        self.models = {}  # Dictionary to store models by symbol
         self.default_model_dir = Path("colab_training/tft_model")
         self.saved_models_dir = Path("saved_models")
         self.saved_models_dir.mkdir(exist_ok=True)
