@@ -328,7 +328,7 @@ def test_market_feed_integration(sample_config):
             print(f"\nNaN counts for {symbol}:")
             print(symbol_data.isna().sum())
             print(f"\nFirst few dates for {symbol}:")
-            print(symbol_data.index.get_level_values('datetime').head())
+            print(symbol_data.index[:5])
         
         # Verify the data structure and content
         assert isinstance(df, pd.DataFrame)
