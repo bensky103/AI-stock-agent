@@ -379,6 +379,36 @@ class FeatureEngineer:
         
         return market_features, sentiment_features
 
+    def prepare_features(self, market_data: pd.DataFrame) -> np.ndarray:
+        """Prepare features for prediction.
+        
+        This is a wrapper around prepare_prediction_data that returns only the 
+        market features.
+        
+        Args:
+            market_data: DataFrame containing market data
+            
+        Returns:
+            numpy array of processed features
+        """
+        # Ensure we have enough data
+        if len(market_data) < self.sequence_length:
+            raise ValueError(f"Need at least {self.sequence_length} time steps of market data")
+        
+        # Calculate technical indicators
+        market_with_indicators = self.calculate_technical_indicators(market_data)
+        
+        # Normalize market data
+        market_normalized, _, _ = self.normalize_features(market_with_indicators)
+        
+        # Prepare sequences
+        sequences = []
+        for i in range(len(market_normalized) - self.sequence_length + 1):
+            sequence = market_normalized.iloc[i:i + self.sequence_length].values
+            sequences.append(sequence)
+        
+        return np.array(sequences)
+
     def generate_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Generate features from market data.
         
