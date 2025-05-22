@@ -559,20 +559,30 @@ class MarketFeed:
                 resample_interval = self.default_interval
             
             if resample_interval != '1d':  # Only resample if not daily
-                # Ensure we have the required columns before resampling
-                required_cols = ['open', 'high', 'low', 'close', 'volume']
-                
-                # Check if we have multi-index columns and flatten if needed
-                if isinstance(df.columns, pd.MultiIndex):
-                    df.columns = [col[0] for col in df.columns]
-                
-                missing_cols = [col for col in required_cols if col not in df.columns]
-                if missing_cols:
-                    raise MarketDataError(f"Missing required columns for resampling: {missing_cols}")
-                
                 try:
+                    # Store the MultiIndex columns structure
+                    column_structure = df.columns
+                    
+                    # Temporarily flatten columns for resampling
+                    df.columns = [f"{col[0]}_{col[1]}" for col in df.columns]
+                    
                     # Resample the data
                     df = resample_market_data(df, resample_interval)
+                    
+                    # Restore MultiIndex columns
+                    new_columns = []
+                    for col in df.columns:
+                        # Split the column name back into indicator and symbol
+                        parts = col.split('_', 1)
+                        if len(parts) == 2:
+                            indicator, symbol = parts
+                            new_columns.append((indicator, symbol))
+                        else:
+                            # Handle any columns that don't follow the pattern
+                            new_columns.append((col, 'unknown'))
+                    
+                    df.columns = pd.MultiIndex.from_tuples(new_columns, names=['indicator', 'symbol'])
+                    
                 except Exception as e:
                     logger.error(f"Error during resampling: {str(e)}")
                     raise MarketDataError(f"Error resampling data: {str(e)}")
@@ -587,15 +597,18 @@ class MarketFeed:
                         else:
                             indicator_config = self.config.get('market_data', {}).get('technical_indicators', {})
                     
+                    # Verify we have MultiIndex columns
+                    if not isinstance(df.columns, pd.MultiIndex):
+                        logger.error("DataFrame columns before adding indicators:")
+                        logger.error(f"Column type: {type(df.columns)}")
+                        logger.error(f"Columns: {df.columns.tolist()}")
+                        raise MarketDataError("DataFrame must have MultiIndex columns")
+                    
                     # Ensure we have all required columns for each symbol
                     required_cols = ['open', 'high', 'low', 'close', 'volume']
                     missing_cols = []
                     
-                    for symbol in df.index.get_level_values('symbol').unique():
-                        symbol_data = df.xs(symbol, level='symbol')
-                        if symbol_data.empty:
-                            raise MarketDataError(f"No data available for {symbol}")
-                        
+                    for symbol in df.columns.get_level_values('symbol').unique():
                         # Check for required columns and their values
                         for col in required_cols:
                             col_key = (col, symbol)
@@ -612,6 +625,14 @@ class MarketFeed:
                         raise MarketDataError(f"Missing required columns for technical indicators: {missing_cols}")
                     
                     df = add_technical_indicators(df, indicator_config)
+                    
+                    # Verify MultiIndex columns after adding indicators
+                    if not isinstance(df.columns, pd.MultiIndex):
+                        logger.error("DataFrame columns after adding indicators:")
+                        logger.error(f"Column type: {type(df.columns)}")
+                        logger.error(f"Columns: {df.columns.tolist()}")
+                        raise MarketDataError("DataFrame lost MultiIndex columns after adding indicators")
+                    
                 except Exception as e:
                     logger.error(f"Error adding technical indicators: {e}")
                     raise
