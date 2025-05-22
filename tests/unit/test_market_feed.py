@@ -279,9 +279,9 @@ def test_market_feed_integration(sample_config):
     """Test market feed integration with multiple symbols and indicators using real yfinance data."""
     feed = MarketFeed(config_path=sample_config)
     
-    # Use fixed dates in the past to ensure data availability
-    end_date = datetime(2024, 3, 1)  # March 1, 2024
-    start_date = datetime(2024, 2, 1)  # February 1, 2024
+    # Use dates from last year to ensure data availability
+    end_date = datetime(2023, 12, 31)  # December 31, 2023
+    start_date = datetime(2023, 12, 1)  # December 1, 2023
     
     print(f"\nFetching data from {start_date} to {end_date}")
     
@@ -308,6 +308,8 @@ def test_market_feed_integration(sample_config):
             print(symbol_data.head())
             print(f"\nNaN counts for {symbol}:")
             print(symbol_data.isna().sum())
+            print(f"\nFirst few dates for {symbol}:")
+            print(symbol_data.index.get_level_values('datetime').head())
         
         # Verify the data structure and content
         assert isinstance(df, pd.DataFrame)
@@ -353,5 +355,6 @@ def test_market_feed_integration(sample_config):
     except Exception as e:
         print(f"\nError occurred: {str(e)}")
         print(f"Error type: {type(e)}")
+        print(f"Error details: {e.__dict__ if hasattr(e, '__dict__') else 'No additional details'}")
         raise
 

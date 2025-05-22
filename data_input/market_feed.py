@@ -569,19 +569,28 @@ class MarketFeed:
         try:
             # Use Ticker.history() instead of download() for consistency
             ticker = yf.Ticker(symbol)
+            
+            # Log the request parameters
+            logger.info(f"Fetching data for {symbol} from {start_date} to {end_date}")
+            
+            # Fetch the data
             data = ticker.history(
                 start=start_date,
                 end=end_date,
-                auto_adjust=False
+                auto_adjust=False,
+                prepost=False  # Only get regular market hours data
             )
             
             if data.empty:
-                logger.warning(f"No data found for {symbol}")
+                logger.warning(f"No data found for {symbol} between {start_date} and {end_date}")
                 return None
             
-            # Log original timestamps
-            logger.info(f"Original timestamps for {symbol} (first 3):")
-            logger.info(f"{data.index[:3]}")
+            # Log the raw data info
+            logger.info(f"Raw data info for {symbol}:")
+            logger.info(f"Shape: {data.shape}")
+            logger.info(f"Columns: {data.columns.tolist()}")
+            logger.info(f"Index type: {type(data.index)}")
+            logger.info(f"First few timestamps: {data.index[:3]}")
             
             # Standardize column names
             data = data.rename(columns={
@@ -593,14 +602,34 @@ class MarketFeed:
                 'Volume': 'volume'
             })
             
-            # Log final timestamps
-            logger.info(f"Final timestamps for {symbol} (first 3):")
-            logger.info(f"{data.index[:3]}")
+            # Ensure the index is timezone-naive
+            if data.index.tz is not None:
+                data.index = data.index.tz_localize(None)
+            
+            # Log the processed data info
+            logger.info(f"Processed data info for {symbol}:")
+            logger.info(f"First few timestamps after processing: {data.index[:3]}")
+            logger.info(f"Sample data:\n{data.head()}")
+            
+            # Verify we have the required columns
+            required_cols = ['open', 'high', 'low', 'close', 'volume']
+            missing_cols = [col for col in required_cols if col not in data.columns]
+            if missing_cols:
+                logger.error(f"Missing required columns for {symbol}: {missing_cols}")
+                return None
+            
+            # Verify we have actual data
+            for col in required_cols:
+                if data[col].isna().all():
+                    logger.error(f"All values are NaN for {col} in {symbol}")
+                    return None
             
             return data
             
         except Exception as e:
-            logger.error(f"Error fetching data for {symbol}: {e}")
+            logger.error(f"Error fetching data for {symbol}: {str(e)}")
+            logger.error(f"Error type: {type(e)}")
+            logger.error(f"Error details: {e.__dict__ if hasattr(e, '__dict__') else 'No additional details'}")
             return None
 
     def start_streaming(
