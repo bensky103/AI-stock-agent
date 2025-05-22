@@ -515,8 +515,12 @@ class MarketFeed:
                     col_lower = col.lower()
                     if col_lower in col_map:
                         target_col = col_map[col_lower]
-                        # Create a Series with the same index as result_df
-                        result_df.loc[symbol_mask, (target_col, symbol)] = symbol_data[col].values
+                        # Get the values for this column
+                        values = symbol_data[col].values
+                        # Create a Series with the same index as the symbol data
+                        series = pd.Series(values, index=symbol_data.index)
+                        # Assign to the result DataFrame
+                        result_df.loc[symbol_mask, (target_col, symbol)] = series
             
             df = result_df
             
