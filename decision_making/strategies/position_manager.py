@@ -94,6 +94,16 @@ class PositionManager:
             Position size in number of shares
         """
         try:
+            # Ensure all inputs are scalar values
+            if isinstance(price, pd.Series):
+                price = price.item()
+            if isinstance(signal_strength, pd.Series):
+                signal_strength = signal_strength.item()
+            if isinstance(volatility, pd.Series):
+                volatility = volatility.item()
+            if isinstance(market_regime, pd.Series):
+                market_regime = market_regime.item()
+                
             # Base position size from signal strength
             base_size = self.max_position_size * signal_strength
             
@@ -350,6 +360,12 @@ class PositionManager:
             If parameters are invalid
         """
         try:
+            # Ensure inputs are scalar values
+            if isinstance(entry_price, pd.Series):
+                entry_price = entry_price.item()
+            if isinstance(size, pd.Series):
+                size = size.item()
+                
             # Validate parameters
             if entry_price <= 0:
                 raise ValueError("Entry price must be positive")
@@ -466,6 +482,12 @@ class PositionManager:
             Created position if trade executed, None otherwise
         """
         try:
+            # Ensure inputs are scalar values
+            if isinstance(signal, pd.Series):
+                signal = signal.item()
+            if isinstance(price, pd.Series):
+                price = price.item()
+                
             # Convert signal to position type
             if signal == 0:
                 return None

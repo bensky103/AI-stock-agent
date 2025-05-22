@@ -187,6 +187,10 @@ class MLHybridStrategy(TradingStrategy):
     ) -> float:
         """Combine different signals into final trading signal."""
         try:
+            # Ensure regime is a scalar value
+            if isinstance(regime, pd.Series):
+                regime = regime.item()
+                
             # Weights for different components
             weights = {
                 'ml': 0.4,
