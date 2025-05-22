@@ -230,7 +230,16 @@ def resample_market_data(
             else:
                 raise MarketDataError("DataFrame must have a 'datetime' or 'Date' column or a DatetimeIndex.")
 
-        df['datetime'] = pd.to_datetime(df['datetime']).dt.tz_localize('UTC')
+        # Ensure datetime is parsed correctly and has UTC timezone
+        df['datetime'] = pd.to_datetime(df['datetime'])
+        
+        # Check if datetime is already timezone-aware
+        if df['datetime'].dt.tz is not None:
+            # Convert to UTC if already timezone-aware
+            df['datetime'] = df['datetime'].dt.tz_convert('UTC')
+        else:
+            # Localize to UTC if timezone-naive
+            df['datetime'] = df['datetime'].dt.tz_localize('UTC')
 
         # Check if we have flattened column names (e.g., 'open_AAPL')
         has_flattened_cols = any('_' in col for col in df.columns if col not in ['symbol', 'datetime'])
