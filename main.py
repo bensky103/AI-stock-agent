@@ -112,7 +112,7 @@ def main():
     
     # 3. Initialize and train predictor
     try:
-        predictor = StockPredictor(
+        predictor = EnhancedStockPredictor(
             model_type='lstm',  # Using LSTM as default
             sequence_length=config['model']['sequence_length'],
             prediction_horizon=config['model']['prediction_horizon']
