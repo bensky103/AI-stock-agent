@@ -490,7 +490,9 @@ class MarketFeed:
             for symbol in df.index.get_level_values('symbol').unique():
                 symbol_data = df.xs(symbol, level='symbol')
                 for col in symbol_data.columns:
-                    result_df[(col, symbol)] = symbol_data[col]
+                    # Ensure column name is lowercase
+                    col_lower = col.lower()
+                    result_df[(col_lower, symbol)] = symbol_data[col]
             
             df = result_df
             
@@ -532,21 +534,24 @@ class MarketFeed:
                     missing_cols = []
                     
                     for symbol in df.index.get_level_values('symbol').unique():
-                        for col in required_cols:
-                            if (col, symbol) not in df.columns:
-                                missing_cols.append(f"{col} for {symbol}")
-                    
-                    if missing_cols:
-                        raise MarketDataError(f"Missing required columns for technical indicators: {missing_cols}")
-                    
-                    # Verify data integrity before adding indicators
-                    for symbol in df.index.get_level_values('symbol').unique():
                         symbol_data = df.xs(symbol, level='symbol')
                         if symbol_data.empty:
                             raise MarketDataError(f"No data available for {symbol}")
+                        
+                        # Check for required columns and their values
                         for col in required_cols:
-                            if symbol_data[(col, symbol)].isna().all():
+                            col_key = (col, symbol)
+                            if col_key not in df.columns:
+                                missing_cols.append(f"{col} for {symbol}")
+                            elif df[col_key].isna().all():
+                                # Log the actual data for debugging
+                                logger.error(f"Data for {symbol} {col}:")
+                                logger.error(f"Shape: {df[col_key].shape}")
+                                logger.error(f"Sample values: {df[col_key].head()}")
                                 raise MarketDataError(f"All values are NaN for {col} in {symbol}")
+                    
+                    if missing_cols:
+                        raise MarketDataError(f"Missing required columns for technical indicators: {missing_cols}")
                     
                     df = add_technical_indicators(df, indicator_config)
                 except Exception as e:
