@@ -490,11 +490,36 @@ class MarketFeed:
             for symbol in df.index.get_level_values('symbol').unique():
                 symbol_data = df.xs(symbol, level='symbol')
                 for col in symbol_data.columns:
-                    # Ensure column name is lowercase
+                    # Skip the symbol column if it exists
+                    if col == 'symbol':
+                        continue
+                    # Ensure column name is lowercase and matches required format
                     col_lower = col.lower()
-                    result_df[(col_lower, symbol)] = symbol_data[col]
+                    # Map the column names to our standard format
+                    col_map = {
+                        'open': 'open',
+                        'high': 'high',
+                        'low': 'low',
+                        'close': 'close',
+                        'adj close': 'adj_close',
+                        'volume': 'volume',
+                        'dividends': 'dividends',
+                        'stock splits': 'stock_splits'
+                    }
+                    if col_lower in col_map:
+                        result_df[(col_map[col_lower], symbol)] = symbol_data[col]
             
             df = result_df
+            
+            # Verify we have the required columns
+            required_cols = ['open', 'high', 'low', 'close', 'volume']
+            for symbol in df.index.get_level_values('symbol').unique():
+                for col in required_cols:
+                    col_key = (col, symbol)
+                    if col_key not in df.columns:
+                        raise MarketDataError(f"Missing required column {col} for {symbol}")
+                    if df[col_key].isna().all():
+                        raise MarketDataError(f"All values are NaN for {col} in {symbol}")
             
             # Resample data if requested
             if resample_interval is None:
