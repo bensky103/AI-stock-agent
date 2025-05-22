@@ -287,25 +287,14 @@ def test_market_feed_integration(mock_ticker, sample_config, sample_market_data)
         # First ensure we have the exact column names from yfinance
         df.columns = ['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']
         df.index.name = 'Date'
-        
-        # Transform the data to match what _fetch_symbol_data returns
-        # This is what _fetch_symbol_data does internally
-        df = df.rename(columns={
-            'Adj Close': 'adj_close',
-            'Open': 'open',
-            'High': 'high',
-            'Low': 'low',
-            'Close': 'close',
-            'Volume': 'volume'
-        })
     
     # Mock Ticker.history to return different data for each symbol
     def mock_history_side_effect(*args, **kwargs):
         symbol = mock_ticker.call_args[0][0]  # Get the symbol from Ticker constructor
         if symbol == 'AAPL':
-            return aapl_data.copy()  # Return a copy to prevent modification
+            return aapl_data  # Return the original DataFrame with yfinance column names
         elif symbol == 'MSFT':
-            return msft_data.copy()  # Return a copy to prevent modification
+            return msft_data  # Return the original DataFrame with yfinance column names
         return pd.DataFrame()
     
     mock_ticker_instance = MagicMock()
