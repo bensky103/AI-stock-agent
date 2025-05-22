@@ -317,16 +317,20 @@ class MarketDataManager:
                         self.data_cache[cache_key] = df
                         self.last_update[symbol] = datetime.now()
                 
-                # Resample data if needed, before setting up multi-index
+                # Ensure datetime index is properly set before resampling
+                if not isinstance(df.index, pd.DatetimeIndex):
+                    df = df.reset_index()
+                    df = df.rename(columns={'Date': 'datetime'})
+                    df['datetime'] = pd.to_datetime(df['datetime'])
+                    df = df.set_index('datetime')
+                
+                # Resample data if needed
                 if interval != '1d':  # Only resample if not daily
-                    # Use the same resampling function as MarketFeed
                     df = resample_market_data(df, interval)
                 
                 # Add symbol column and set multi-index after resampling
-                df['symbol'] = symbol
                 df = df.reset_index()
-                df = df.rename(columns={'Date': 'datetime'})
-                # Ensure datetime column is properly named and set as index
+                df['symbol'] = symbol
                 df = df.set_index(['symbol', 'datetime'])
                 df.index.names = ['symbol', 'datetime']  # Explicitly set index names
                 
