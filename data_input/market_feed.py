@@ -462,6 +462,8 @@ class MarketFeed:
                 if data is not None:
                     # Add symbol column before concatenation
                     data['symbol'] = symbol
+                    # Ensure column names are lowercase before processing
+                    data = _safe_lowercase_columns(data)
                     all_data.append(data)
             
             if not all_data:
@@ -477,14 +479,23 @@ class MarketFeed:
             # Convert datetime to UTC and remove timezone info for consistency
             df['datetime'] = pd.to_datetime(df['datetime']).dt.tz_localize(None)
             
-            # Ensure column names are lowercase before setting multi-index
-            df = _safe_lowercase_columns(df)
-            
             # Set multi-index with symbol and datetime
             df = df.set_index(['symbol', 'datetime'])
             
             # Create a new DataFrame with MultiIndex columns
             result_df = pd.DataFrame(index=df.index)
+            
+            # Map the column names to our standard format
+            col_map = {
+                'open': 'open',
+                'high': 'high',
+                'low': 'low',
+                'close': 'close',
+                'adj close': 'adj_close',
+                'volume': 'volume',
+                'dividends': 'dividends',
+                'stock splits': 'stock_splits'
+            }
             
             # Add each column with its symbol level
             for symbol in df.index.get_level_values('symbol').unique():
@@ -493,23 +504,21 @@ class MarketFeed:
                     # Skip the symbol column if it exists
                     if col == 'symbol':
                         continue
-                    # Ensure column name is lowercase and matches required format
+                    
+                    # Map the column name to our standard format
                     col_lower = col.lower()
-                    # Map the column names to our standard format
-                    col_map = {
-                        'open': 'open',
-                        'high': 'high',
-                        'low': 'low',
-                        'close': 'close',
-                        'adj close': 'adj_close',
-                        'volume': 'volume',
-                        'dividends': 'dividends',
-                        'stock splits': 'stock_splits'
-                    }
                     if col_lower in col_map:
-                        result_df[(col_map[col_lower], symbol)] = symbol_data[col]
+                        target_col = col_map[col_lower]
+                        result_df[(target_col, symbol)] = symbol_data[col]
             
             df = result_df
+            
+            # Log the data for debugging
+            logger.debug(f"DataFrame after transformation:")
+            logger.debug(f"Shape: {df.shape}")
+            logger.debug(f"Columns: {df.columns.tolist()}")
+            logger.debug(f"Index levels: {df.index.names}")
+            logger.debug(f"Sample data:\n{df.head()}")
             
             # Verify we have the required columns
             required_cols = ['open', 'high', 'low', 'close', 'volume']
@@ -517,8 +526,14 @@ class MarketFeed:
                 for col in required_cols:
                     col_key = (col, symbol)
                     if col_key not in df.columns:
+                        logger.error(f"Missing column {col} for {symbol}")
+                        logger.error(f"Available columns: {df.columns.tolist()}")
                         raise MarketDataError(f"Missing required column {col} for {symbol}")
                     if df[col_key].isna().all():
+                        logger.error(f"All values are NaN for {col} in {symbol}")
+                        logger.error(f"Data for {symbol} {col}:")
+                        logger.error(f"Shape: {df[col_key].shape}")
+                        logger.error(f"Sample values: {df[col_key].head()}")
                         raise MarketDataError(f"All values are NaN for {col} in {symbol}")
             
             # Resample data if requested
