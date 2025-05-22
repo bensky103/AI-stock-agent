@@ -479,31 +479,33 @@ class MarketFeed:
             # Convert datetime to UTC and remove timezone info for consistency
             df['datetime'] = pd.to_datetime(df['datetime']).dt.tz_localize(None)
             
-            # Set multi-index with symbol and datetime
-            df = df.set_index(['symbol', 'datetime'])
-            
             # Create a new DataFrame with MultiIndex columns
-            result_df = pd.DataFrame(index=df.index)
+            # First, get all unique symbols and dates
+            symbols = df['symbol'].unique()
+            dates = df['datetime'].unique()
             
-            # Map the column names to our standard format, handling both cases
+            # Create a MultiIndex for the result DataFrame
+            index = pd.MultiIndex.from_product([symbols, dates], names=['symbol', 'datetime'])
+            result_df = pd.DataFrame(index=index)
+            
+            # Map the column names to our standard format
             col_map = {
                 'open': 'open',
                 'high': 'high',
                 'low': 'low',
                 'close': 'close',
                 'adj close': 'adj_close',
-                'adj_close': 'adj_close',  # Handle both formats
+                'adj_close': 'adj_close',
                 'volume': 'volume',
                 'dividends': 'dividends',
                 'stock splits': 'stock_splits',
-                'stock_splits': 'stock_splits'  # Handle both formats
+                'stock_splits': 'stock_splits'
             }
             
             # Add each column with its symbol level
-            for symbol in df.index.get_level_values('symbol').unique():
+            for symbol in symbols:
                 # Get data for this symbol
-                symbol_mask = df.index.get_level_values('symbol') == symbol
-                symbol_data = df[symbol_mask]
+                symbol_data = df[df['symbol'] == symbol].set_index('datetime')
                 
                 # Process each column
                 for col in symbol_data.columns:
@@ -515,12 +517,14 @@ class MarketFeed:
                     col_lower = col.lower()
                     if col_lower in col_map:
                         target_col = col_map[col_lower]
-                        # Get the values for this column
-                        values = symbol_data[col].values
-                        # Create a Series with the same index as the symbol data
-                        series = pd.Series(values, index=symbol_data.index)
+                        # Create a Series with the same index as the result DataFrame
+                        # but only for this symbol
+                        symbol_idx = pd.MultiIndex.from_product([[symbol], dates], names=['symbol', 'datetime'])
+                        series = pd.Series(index=symbol_idx)
+                        # Fill in the values where we have data
+                        series.loc[symbol_idx] = symbol_data[col].reindex(dates).values
                         # Assign to the result DataFrame
-                        result_df.loc[symbol_mask, (target_col, symbol)] = series
+                        result_df[(target_col, symbol)] = series
             
             df = result_df
             
