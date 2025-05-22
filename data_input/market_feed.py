@@ -501,7 +501,11 @@ class MarketFeed:
             
             # Add each column with its symbol level
             for symbol in df.index.get_level_values('symbol').unique():
-                symbol_data = df.xs(symbol, level='symbol')
+                # Get data for this symbol
+                symbol_mask = df.index.get_level_values('symbol') == symbol
+                symbol_data = df[symbol_mask]
+                
+                # Process each column
                 for col in symbol_data.columns:
                     # Skip the symbol column if it exists
                     if col == 'symbol':
@@ -511,8 +515,8 @@ class MarketFeed:
                     col_lower = col.lower()
                     if col_lower in col_map:
                         target_col = col_map[col_lower]
-                        # Copy the data directly from the source column
-                        result_df[(target_col, symbol)] = symbol_data[col].values
+                        # Create a Series with the same index as result_df
+                        result_df.loc[symbol_mask, (target_col, symbol)] = symbol_data[col].values
             
             df = result_df
             
