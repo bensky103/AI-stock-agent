@@ -204,7 +204,7 @@ def resample_market_data(
         agg_dict: Optional dictionary of aggregation functions
         
     Returns:
-        Resampled DataFrame
+        Resampled DataFrame with timestamps aligned to market open (14:30 UTC)
     """
     if agg_dict is None:
         agg_dict = {
@@ -253,11 +253,17 @@ def resample_market_data(
             # Get data for this symbol
             symbol_data = df[df['symbol'] == symbol].copy()
             
+            # Ensure datetime is in UTC
+            symbol_data['datetime'] = pd.to_datetime(symbol_data['datetime']).dt.tz_localize('UTC')
+            
             # Set datetime as index for resampling
             symbol_data = symbol_data.set_index('datetime')
             
-            # Resample the data
-            resampled = symbol_data.resample(interval).agg(agg_dict_flat)
+            # Resample the data with market open time (14:30 UTC)
+            resampled = symbol_data.resample(
+                interval,
+                offset='14H30min'  # Align to market open (14:30 UTC)
+            ).agg(agg_dict_flat)
             
             # Reset index to make datetime a column again
             resampled = resampled.reset_index()

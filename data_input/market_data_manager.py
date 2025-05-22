@@ -319,17 +319,8 @@ class MarketDataManager:
                 
                 # Resample data if needed, before setting up multi-index
                 if interval != '1d':  # Only resample if not daily
-                    # For all intervals, use market open (14:30 UTC) as anchor point
-                    offset = pd.Timedelta(hours=14, minutes=30)
-                    resampler = df.resample(interval, offset=offset)
-                    
-                    df = resampler.agg({
-                        'open': 'first',
-                        'high': 'max',
-                        'low': 'min',
-                        'close': 'last',
-                        'volume': 'sum'
-                    })
+                    # Use the same resampling function as MarketFeed
+                    df = resample_market_data(df, interval)
                 
                 # Add symbol column and set multi-index after resampling
                 df['symbol'] = symbol
