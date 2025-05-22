@@ -232,58 +232,121 @@ def resample_market_data(
 
         df['datetime'] = pd.to_datetime(df['datetime']).dt.tz_localize('UTC')
 
-        # Identify OHLCV columns and other columns (indicators)
-        ohlcv_cols = [col for col in agg_dict.keys() if col in df.columns]
+        # Check if we have flattened column names (e.g., 'open_AAPL')
+        has_flattened_cols = any('_' in col for col in df.columns if col not in ['symbol', 'datetime'])
+        
+        # Map columns to OHLCV base names
+        base_to_cols = {}
+        if has_flattened_cols:
+            # Extract base column names from flattened format
+            for col in df.columns:
+                if col in ['symbol', 'datetime']:
+                    continue
+                    
+                parts = col.split('_', 1)
+                if len(parts) == 2:
+                    base_col, symbol = parts
+                    if base_col not in base_to_cols:
+                        base_to_cols[base_col] = []
+                    base_to_cols[base_col].append(col)
+        else:
+            # Simple column mapping for non-flattened data
+            for col in df.columns:
+                if col in ['symbol', 'datetime']:
+                    continue
+                if col in agg_dict:
+                    if col not in base_to_cols:
+                        base_to_cols[col] = []
+                    base_to_cols[col].append(col)
+
+        # Identify OHLCV columns using our mapping
+        ohlcv_base_cols = [col for col in agg_dict.keys() if col in base_to_cols]
+        
+        # Get all flattened OHLCV columns
+        ohlcv_cols = []
+        for base_col in ohlcv_base_cols:
+            ohlcv_cols.extend(base_to_cols[base_col])
+            
         other_cols = [col for col in df.columns if col not in ohlcv_cols and col not in ['datetime', 'symbol']]
 
         if not ohlcv_cols:
-            raise MarketDataError(f"No OHLCV columns found for resampling. Available: {df.columns.tolist()}")
+            # If we still don't have columns, try a more permissive approach for flattened names
+            if has_flattened_cols:
+                for col in df.columns:
+                    for base_col in agg_dict.keys():
+                        if col.startswith(f"{base_col}_"):
+                            if base_col not in base_to_cols:
+                                base_to_cols[base_col] = []
+                            base_to_cols[base_col].append(col)
+                            ohlcv_cols.append(col)
+            
+            # If we still don't have columns, raise error
+            if not ohlcv_cols:
+                raise MarketDataError(f"No OHLCV columns found for resampling. Available: {df.columns.tolist()}")
 
-        # Separate data for resampling and for merging later
-        ohlcv_data = df[['datetime', 'symbol'] + ohlcv_cols if 'symbol' in df.columns else ['datetime'] + ohlcv_cols]
-        if other_cols:
-            # For other columns, we typically take the last value in the period
-            other_data_agg = {col: 'last' for col in other_cols}
-            # If we have a symbol, group by it for other_data as well
-            if 'symbol' in df.columns:
-                 other_data_to_resample = df[['datetime', 'symbol'] + other_cols]
-                 other_data_resampled_list = []
-                 for sym, group in other_data_to_resample.groupby('symbol'):
-                    group_resampled = group.set_index('datetime').resample(interval, offset='14H30min').agg(other_data_agg)
-                    group_resampled['symbol'] = sym
-                    other_data_resampled_list.append(group_resampled.reset_index())
-                 other_data_resampled = pd.concat(other_data_resampled_list)
-            else:
-                other_data_to_resample = df[['datetime'] + other_cols]
-                other_data_resampled = other_data_to_resample.set_index('datetime').resample(interval, offset='14H30min').agg(other_data_agg).reset_index()
+        # Create aggregation dictionary for flattened columns
+        agg_dict_flat = {}
+        for base_col, cols in base_to_cols.items():
+            if base_col in agg_dict:
+                for col in cols:
+                    agg_dict_flat[col] = agg_dict[base_col]
 
-        resampled_dfs = []
-        group_cols = ['symbol'] if 'symbol' in ohlcv_data.columns else []
-
-        if group_cols:
-            for symbol_val, group in ohlcv_data.groupby(group_cols):
+        # Separate data for resampling
+        if 'symbol' in df.columns:
+            resampled_dfs = []
+            for symbol_val, group in df.groupby('symbol'):
+                # Set datetime as index for resampling
                 group = group.set_index('datetime')
-                resampled_group = group[ohlcv_cols].resample(interval, offset='14H30min').agg(agg_dict)
-                if isinstance(symbol_val, tuple):
-                    for i, col_name in enumerate(group_cols):
-                        resampled_group[col_name] = symbol_val[i]
-                else:
-                    resampled_group[group_cols[0]] = symbol_val
-                resampled_dfs.append(resampled_group.reset_index())
-            final_resampled_df = pd.concat(resampled_dfs)
+                
+                # Determine which columns to use for this group
+                group_cols = [col for col in ohlcv_cols if col in group.columns]
+                
+                # Create group-specific aggregation dict
+                group_agg = {col: agg_dict_flat[col] for col in group_cols if col in agg_dict_flat}
+                
+                # Add other columns with 'last' aggregation
+                for col in group.columns:
+                    if col not in group_agg and col != 'symbol':
+                        group_agg[col] = 'last'
+                
+                if not group_cols:
+                    raise MarketDataError(f"No OHLCV columns found for symbol {symbol_val}. Available: {group.columns.tolist()}")
+                
+                # Resample the data
+                resampled = group.resample(interval, offset='14h30min').agg(group_agg)
+                
+                # Add symbol column back
+                resampled['symbol'] = symbol_val
+                
+                # Reset index for concat
+                resampled = resampled.reset_index()
+                
+                resampled_dfs.append(resampled)
+                
+            # Combine all resampled data
+            final_resampled_df = pd.concat(resampled_dfs, ignore_index=True)
         else:
-            ohlcv_data = ohlcv_data.set_index('datetime')
-            final_resampled_df = ohlcv_data[ohlcv_cols].resample(interval, offset='14H30min').agg(agg_dict).reset_index()
+            # For data without a symbol column
+            df = df.set_index('datetime')
+            
+            # Create aggregation dict
+            full_agg = {}
+            # Add OHLCV columns
+            for col in ohlcv_cols:
+                if col in agg_dict_flat:
+                    full_agg[col] = agg_dict_flat[col]
+            
+            # Add other columns with 'last' aggregation
+            for col in other_cols:
+                full_agg[col] = 'last'
+                
+            # Resample the data
+            final_resampled_df = df.resample(interval, offset='14h30min').agg(full_agg).reset_index()
 
-        # Merge with other_data if it exists
-        if other_cols:
-            merge_on = ['datetime', 'symbol'] if 'symbol' in final_resampled_df.columns and 'symbol' in other_data_resampled.columns else ['datetime']
-            final_resampled_df = pd.merge(final_resampled_df, other_data_resampled, on=merge_on, how='left')
-
-        # Set the original index back if it was a MultiIndex, or just datetime
+        # Set the index structure back
         if 'symbol' in final_resampled_df.columns:
             final_resampled_df = final_resampled_df.set_index(['symbol', 'datetime'])
-        elif 'datetime' in final_resampled_df.columns:
+        else:
             final_resampled_df = final_resampled_df.set_index('datetime')
         
         # Ensure original index names are restored if they existed
