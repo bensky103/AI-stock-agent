@@ -11,7 +11,7 @@ from data_input.market_feed import MarketFeed
 from prediction_engine.sequence_preprocessor import SequencePreprocessor  
 from prediction_engine.feature_engineering import FeatureEngineer
 # Use predictor instead of enhanced_stock_predictor which doesn't exist
-from prediction_engine.predictor import StockPredictor
+from prediction_engine.predictor import EnhancedStockPredictor
 
 # Set up logging
 logging.basicConfig(
