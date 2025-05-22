@@ -215,23 +215,31 @@ def resample_market_data(
             'volume': 'sum'
         }
     
-    # Extract base column names from flattened format (e.g., 'open_AAPL' -> 'open')
-    base_cols = {}
-    for col in df.columns:
-        parts = col.split('_', 1)
-        if len(parts) == 2:
-            base_col, symbol = parts
-            if base_col not in base_cols:
-                base_cols[base_col] = []
-            base_cols[base_col].append(col)
-    
-    # Ensure we have the required columns
-    required_cols = ['open', 'high', 'low', 'close', 'volume']
-    missing_cols = [col for col in required_cols if col not in base_cols]
-    if missing_cols:
-        raise MarketDataError(f"Missing required columns for resampling: {missing_cols}")
-    
     try:
+        # Store the original index names
+        index_names = df.index.names
+        
+        # Reset the index to make datetime a column
+        df = df.reset_index()
+        
+        # Extract base column names from flattened format (e.g., 'open_AAPL' -> 'open')
+        base_cols = {}
+        for col in df.columns:
+            if col in index_names:  # Skip index columns
+                continue
+            parts = col.split('_', 1)
+            if len(parts) == 2:
+                base_col, symbol = parts
+                if base_col not in base_cols:
+                    base_cols[base_col] = []
+                base_cols[base_col].append(col)
+        
+        # Ensure we have the required columns
+        required_cols = ['open', 'high', 'low', 'close', 'volume']
+        missing_cols = [col for col in required_cols if col not in base_cols]
+        if missing_cols:
+            raise MarketDataError(f"Missing required columns for resampling: {missing_cols}")
+        
         # Create a dictionary mapping each base column to its aggregation function
         agg_dict_flat = {}
         for base_col, cols in base_cols.items():
@@ -239,13 +247,33 @@ def resample_market_data(
                 for col in cols:
                     agg_dict_flat[col] = agg_dict[base_col]
         
-        # Resample without any offset to preserve original timestamps
-        resampler = df.resample(interval)
+        # Group by symbol and resample each group
+        resampled_dfs = []
+        for symbol in df['symbol'].unique():
+            # Get data for this symbol
+            symbol_data = df[df['symbol'] == symbol].copy()
+            
+            # Set datetime as index for resampling
+            symbol_data = symbol_data.set_index('datetime')
+            
+            # Resample the data
+            resampled = symbol_data.resample(interval).agg(agg_dict_flat)
+            
+            # Reset index to make datetime a column again
+            resampled = resampled.reset_index()
+            
+            # Add symbol column back
+            resampled['symbol'] = symbol
+            
+            resampled_dfs.append(resampled)
         
-        # Apply aggregations using the flattened column names
-        resampled = resampler.agg(agg_dict_flat)
+        # Combine all resampled data
+        result = pd.concat(resampled_dfs, ignore_index=True)
         
-        return resampled
+        # Set the MultiIndex back
+        result = result.set_index(['symbol', 'datetime'])
+        
+        return result
         
     except Exception as e:
         logger.error(f"Error during resampling: {str(e)}")
