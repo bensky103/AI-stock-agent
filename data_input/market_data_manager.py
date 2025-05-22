@@ -330,7 +330,26 @@ class MarketDataManager:
                 
                 # Add symbol column and set multi-index after resampling
                 df = df.reset_index()
+                
+                # Check for datetime column name - it might be 'index', 'date', 'Date', or 'datetime'
+                datetime_col = None
+                for col in df.columns:
+                    if col.lower() in ['date', 'datetime', 'index', 'time', 'timestamp']:
+                        datetime_col = col
+                        break
+                
+                # If no datetime column found, the index itself might be the datetime
+                if datetime_col is None:
+                    df['datetime'] = df.index
+                else:
+                    # Rename to standardized 'datetime' column
+                    df = df.rename(columns={datetime_col: 'datetime'})
+                
+                # Ensure datetime column is actually a datetime type
+                df['datetime'] = pd.to_datetime(df['datetime'])
                 df['symbol'] = symbol
+                
+                # Now set the multi-index with the standardized column names
                 df = df.set_index(['symbol', 'datetime'])
                 df.index.names = ['symbol', 'datetime']  # Explicitly set index names
                 
