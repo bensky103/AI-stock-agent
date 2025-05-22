@@ -69,10 +69,10 @@ class TestDecisionMakingIntegration:
         
         # 3. Execute trades based on signals
         for timestamp, row in signals.iterrows():
-            if row['signal'] != 0:  # If there's a signal
+            if row['signal'].item() != 0:  # If there's a signal
                 position = components['position_manager'].execute_trade(
                     symbol='AAPL',
-                    signal=row['signal'],
+                    signal=row['signal'].item(),
                     price=row['close'],
                     timestamp=timestamp
                 )
@@ -189,10 +189,10 @@ class TestDecisionMakingIntegration:
         # Open and track positions
         positions = []
         for timestamp, row in signals.iterrows():
-            if row['signal'] != 0:
+            if row['signal'].item() != 0:
                 position = components['position_manager'].execute_trade(
                     symbol='AAPL',
-                    signal=row['signal'],
+                    signal=row['signal'].item(),
                     price=row['close'],
                     timestamp=timestamp
                 )
