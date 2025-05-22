@@ -279,58 +279,79 @@ def test_market_feed_integration(sample_config):
     """Test market feed integration with multiple symbols and indicators using real yfinance data."""
     feed = MarketFeed(config_path=sample_config)
     
-    # Use a fixed date range that we know has data
-    # Using a recent date range to ensure data availability
-    end_date = datetime.now() - timedelta(days=1)  # Yesterday
-    start_date = end_date - timedelta(days=30)  # Last 30 days
+    # Use fixed dates in the past to ensure data availability
+    end_date = datetime(2024, 3, 1)  # March 1, 2024
+    start_date = datetime(2024, 2, 1)  # February 1, 2024
+    
+    print(f"\nFetching data from {start_date} to {end_date}")
     
     # Test data fetching with multiple symbols
     symbols = ['AAPL', 'MSFT']
-    df = feed.fetch_data(
-        symbols=symbols,
-        start_date=start_date,
-        end_date=end_date,
-        add_indicators=True
-    )
-    
-    # Verify the data structure and content
-    assert isinstance(df, pd.DataFrame)
-    assert not df.empty
-    
-    # Check that we have data for both symbols
-    assert len(df.index.get_level_values('symbol').unique()) == 2
-    assert 'AAPL' in df.index.get_level_values('symbol')
-    assert 'MSFT' in df.index.get_level_values('symbol')
-    
-    # Check basic columns
-    required_columns = ['open', 'high', 'low', 'close', 'volume']
-    for symbol in symbols:
-        for col in required_columns:
-            assert (col, symbol) in df.columns, f"Missing {col} column for {symbol}"
-            # Verify we have actual data
+    try:
+        df = feed.fetch_data(
+            symbols=symbols,
+            start_date=start_date,
+            end_date=end_date,
+            add_indicators=True
+        )
+        
+        print("\nDataFrame Info:")
+        print(f"Shape: {df.shape}")
+        print(f"Columns: {df.columns.tolist()}")
+        print(f"Index levels: {df.index.names}")
+        print(f"Index values: {df.index.get_level_values('symbol').unique()}")
+        
+        # Print sample data for each symbol
+        for symbol in symbols:
             symbol_data = df.xs(symbol, level='symbol')
-            assert not symbol_data[(col, symbol)].isna().all(), f"All values are NaN for {col} in {symbol}"
-            assert len(symbol_data) > 0, f"No data rows for {symbol}"
-    
-    # Check technical indicators
-    indicator_columns = ['sma_20', 'rsi']
-    for symbol in symbols:
-        for col in indicator_columns:
-            assert (col, symbol) in df.columns, f"Missing {col} indicator for {symbol}"
-            # Verify indicators are calculated
+            print(f"\nSample data for {symbol}:")
+            print(symbol_data.head())
+            print(f"\nNaN counts for {symbol}:")
+            print(symbol_data.isna().sum())
+        
+        # Verify the data structure and content
+        assert isinstance(df, pd.DataFrame)
+        assert not df.empty
+        
+        # Check that we have data for both symbols
+        assert len(df.index.get_level_values('symbol').unique()) == 2
+        assert 'AAPL' in df.index.get_level_values('symbol')
+        assert 'MSFT' in df.index.get_level_values('symbol')
+        
+        # Check basic columns
+        required_columns = ['open', 'high', 'low', 'close', 'volume']
+        for symbol in symbols:
+            for col in required_columns:
+                assert (col, symbol) in df.columns, f"Missing {col} column for {symbol}"
+                # Verify we have actual data
+                symbol_data = df.xs(symbol, level='symbol')
+                assert not symbol_data[(col, symbol)].isna().all(), f"All values are NaN for {col} in {symbol}"
+                assert len(symbol_data) > 0, f"No data rows for {symbol}"
+        
+        # Check technical indicators
+        indicator_columns = ['sma_20', 'rsi']
+        for symbol in symbols:
+            for col in indicator_columns:
+                assert (col, symbol) in df.columns, f"Missing {col} indicator for {symbol}"
+                # Verify indicators are calculated
+                symbol_data = df.xs(symbol, level='symbol')
+                assert not symbol_data[(col, symbol)].isna().all(), f"All values are NaN for {col} in {symbol}"
+        
+        # Verify price relationships
+        for symbol in symbols:
             symbol_data = df.xs(symbol, level='symbol')
-            assert not symbol_data[(col, symbol)].isna().all(), f"All values are NaN for {col} in {symbol}"
-    
-    # Verify price relationships
-    for symbol in symbols:
-        symbol_data = df.xs(symbol, level='symbol')
-        # High should be highest
-        assert (symbol_data[('high', symbol)] >= symbol_data[('low', symbol)]).all(), f"High prices not always >= Low prices for {symbol}"
-        assert (symbol_data[('high', symbol)] >= symbol_data[('open', symbol)]).all(), f"High prices not always >= Open prices for {symbol}"
-        assert (symbol_data[('high', symbol)] >= symbol_data[('close', symbol)]).all(), f"High prices not always >= Close prices for {symbol}"
-        # Low should be lowest
-        assert (symbol_data[('low', symbol)] <= symbol_data[('open', symbol)]).all(), f"Low prices not always <= Open prices for {symbol}"
-        assert (symbol_data[('low', symbol)] <= symbol_data[('close', symbol)]).all(), f"Low prices not always <= Close prices for {symbol}"
-        # Volume should be positive
-        assert (symbol_data[('volume', symbol)] >= 0).all(), f"Negative volume found for {symbol}"
+            # High should be highest
+            assert (symbol_data[('high', symbol)] >= symbol_data[('low', symbol)]).all(), f"High prices not always >= Low prices for {symbol}"
+            assert (symbol_data[('high', symbol)] >= symbol_data[('open', symbol)]).all(), f"High prices not always >= Open prices for {symbol}"
+            assert (symbol_data[('high', symbol)] >= symbol_data[('close', symbol)]).all(), f"High prices not always >= Close prices for {symbol}"
+            # Low should be lowest
+            assert (symbol_data[('low', symbol)] <= symbol_data[('open', symbol)]).all(), f"Low prices not always <= Open prices for {symbol}"
+            assert (symbol_data[('low', symbol)] <= symbol_data[('close', symbol)]).all(), f"Low prices not always <= Close prices for {symbol}"
+            # Volume should be positive
+            assert (symbol_data[('volume', symbol)] >= 0).all(), f"Negative volume found for {symbol}"
+            
+    except Exception as e:
+        print(f"\nError occurred: {str(e)}")
+        print(f"Error type: {type(e)}")
+        raise
 
