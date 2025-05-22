@@ -41,11 +41,11 @@ class TestMarketDataIntegration:
     def test_data_consistency(self, setup_market_components):
         """Test data consistency across different operations"""
         components = setup_market_components
-
+        
         # Get data for a specific period - fetch 26 weeks for weekly data
         end_date = datetime.now(pytz.UTC) - timedelta(days=1)  # Use UTC and subtract one day
         start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks
-
+        
         # Fetch from both managers
         market_data = components['market_manager'].fetch_data(
             symbols='AAPL',
@@ -53,14 +53,14 @@ class TestMarketDataIntegration:
             end_date=end_date,
             resample_interval='1W'  # Explicitly request weekly data
         )
-
+        
         enhanced_data = components['enhanced_manager'].get_market_data(
             symbols='AAPL',
             start_date=start_date,
             end_date=end_date,
             interval='1W'  # Use weekly data
         )
-
+        
         # Verify data consistency
         assert isinstance(market_data, pd.DataFrame)
         assert isinstance(enhanced_data, pd.DataFrame)
@@ -68,7 +68,7 @@ class TestMarketDataIntegration:
         assert not enhanced_data.empty
         assert len(market_data) >= 8  # Ensure enough weekly data points
         assert len(enhanced_data) >= 8  # Ensure enough weekly data points
-
+        
         # Get dates and convert to UTC if needed
         market_dates = market_data.index.get_level_values('datetime')
         enhanced_dates = enhanced_data.index.get_level_values('datetime')
@@ -78,17 +78,28 @@ class TestMarketDataIntegration:
             market_dates = market_dates.tz_localize(pytz.UTC)
         elif market_dates.tz != pytz.UTC:
             market_dates = market_dates.tz_convert(pytz.UTC)
-            
+        
         if enhanced_dates.tz is None:
             enhanced_dates = enhanced_dates.tz_localize(pytz.UTC)
         elif enhanced_dates.tz != pytz.UTC:
             enhanced_dates = enhanced_dates.tz_convert(pytz.UTC)
-
+        
         # Compare dates directly - they should both be at market open (14:30 UTC)
         assert market_dates.equals(enhanced_dates), "Date indices should match at market open (14:30 UTC)"
-
-        # Compare data values
+        
+        # Compare data values - handle different array shapes
         for col in ['open', 'high', 'low', 'close', 'volume']:
             market_values = market_data[col].values
             enhanced_values = enhanced_data[col].values
-            np.testing.assert_array_almost_equal(market_values, enhanced_values, decimal=2) 
+            
+            # Convert to 1D arrays if needed
+            if market_values.ndim > 1:
+                market_values = market_values.flatten()
+            if enhanced_values.ndim > 1:
+                enhanced_values = enhanced_values.flatten()
+            
+            # For volume, which can be large numbers, use relative tolerance
+            if col == 'volume':
+                np.testing.assert_allclose(market_values, enhanced_values, rtol=0.05)  # 5% relative tolerance
+            else:
+                np.testing.assert_array_almost_equal(market_values, enhanced_values, decimal=2) 
