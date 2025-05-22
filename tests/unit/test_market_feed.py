@@ -295,18 +295,21 @@ def test_market_feed_integration(mock_ticker, sample_config, sample_market_data)
         assert not df['Close'].isna().all(), "Close prices should not be all NaN"
         assert not df['Volume'].isna().all(), "Volume should not be all NaN"
     
-    # Mock Ticker.history to return different data for each symbol
-    def mock_history_side_effect(*args, **kwargs):
-        symbol = mock_ticker.call_args[0][0]  # Get the symbol from Ticker constructor
-        if symbol == 'AAPL':
-            return aapl_data.copy()  # Return a copy to prevent modification
-        elif symbol == 'MSFT':
-            return msft_data.copy()  # Return a copy to prevent modification
-        return pd.DataFrame()
+    # Create mock Ticker instances for each symbol
+    mock_aapl = MagicMock()
+    mock_aapl.history.return_value = aapl_data
+    mock_msft = MagicMock()
+    mock_msft.history.return_value = msft_data
     
-    mock_ticker_instance = MagicMock()
-    mock_ticker_instance.history.side_effect = mock_history_side_effect
-    mock_ticker.return_value = mock_ticker_instance
+    # Set up the mock to return different Ticker instances for each symbol
+    def mock_ticker_side_effect(symbol, *args, **kwargs):
+        if symbol == 'AAPL':
+            return mock_aapl
+        elif symbol == 'MSFT':
+            return mock_msft
+        return MagicMock()
+    
+    mock_ticker.side_effect = mock_ticker_side_effect
     
     feed = MarketFeed(config_path=sample_config)
     
