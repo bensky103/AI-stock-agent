@@ -502,6 +502,9 @@ class MarketFeed:
                 'stock_splits': 'stock_splits'
             }
             
+            # Create a list to store all column tuples
+            column_tuples = []
+            
             # Add each column with its symbol level
             for symbol in symbols:
                 # Get data for this symbol
@@ -517,6 +520,8 @@ class MarketFeed:
                     col_lower = col.lower()
                     if col_lower in col_map:
                         target_col = col_map[col_lower]
+                        # Add to column tuples
+                        column_tuples.append((target_col, symbol))
                         # Create a Series with the same index as the result DataFrame
                         # but only for this symbol
                         symbol_idx = pd.MultiIndex.from_product([[symbol], dates], names=['symbol', 'datetime'])
@@ -526,11 +531,22 @@ class MarketFeed:
                         # Assign to the result DataFrame
                         result_df[(target_col, symbol)] = series
             
+            # Create proper MultiIndex columns
+            result_df.columns = pd.MultiIndex.from_tuples(column_tuples, names=['indicator', 'symbol'])
             df = result_df
+            
+            # Verify MultiIndex columns are properly created
+            if not isinstance(df.columns, pd.MultiIndex):
+                logger.error("Failed to create MultiIndex columns")
+                logger.error(f"Column type: {type(df.columns)}")
+                logger.error(f"Columns: {df.columns.tolist()}")
+                raise MarketDataError("Failed to create MultiIndex columns")
             
             # Log the data for debugging
             logger.debug(f"DataFrame after transformation:")
             logger.debug(f"Shape: {df.shape}")
+            logger.debug(f"Column type: {type(df.columns)}")
+            logger.debug(f"Column names: {df.columns.names}")
             logger.debug(f"Columns: {df.columns.tolist()}")
             logger.debug(f"Index levels: {df.index.names}")
             logger.debug(f"Sample data:\n{df.head()}")
