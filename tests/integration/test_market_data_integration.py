@@ -42,9 +42,9 @@ class TestMarketDataIntegration:
         """Test data consistency across different operations"""
         components = setup_market_components
         
-        # Get data for a specific period - fetch 26 weeks for weekly data
-        end_date = datetime.now(pytz.UTC) - timedelta(days=1)  # Use UTC and subtract one day
-        start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks
+        # Get data for a specific period using fixed historical dates
+        end_date = datetime(2023, 5, 1, tzinfo=pytz.UTC)  # Fixed historical date with UTC timezone
+        start_date = datetime(2022, 11, 1, tzinfo=pytz.UTC)  # ~6 months before end_date
         
         # Fetch from both managers
         market_data = components['market_manager'].fetch_data(

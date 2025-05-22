@@ -44,10 +44,9 @@ class TestDataPipelineIntegration:
         """Test the complete flow from market data fetching to preprocessing"""
         pipeline = setup_pipeline
         
-        # 1. Fetch market data - fetch 26 weeks to ensure enough weekly data points
-        current_time = datetime.now()
-        end_date = current_time.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)  # Use yesterday's date
-        start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks for weekly data
+        # 1. Fetch market data - use fixed historical dates instead of relative dates
+        end_date = datetime(2023, 5, 1)  # Fixed historical date
+        start_date = datetime(2022, 11, 1)  # ~6 months before end_date
         market_data = pipeline['market_manager'].fetch_data(
             symbols='AAPL',
             start_date=start_date,
@@ -80,10 +79,9 @@ class TestDataPipelineIntegration:
         """Test integration between news sentiment and market data"""
         pipeline = setup_pipeline
         
-        # 1. Fetch market data - fetch 26 weeks for weekly data
-        current_time = datetime.now()
-        end_date = current_time.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)  # Use yesterday's date
-        start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks
+        # 1. Fetch market data - use fixed historical dates
+        end_date = datetime(2023, 5, 1)  # Fixed historical date
+        start_date = datetime(2022, 11, 1)  # ~6 months before end_date
         market_data = pipeline['market_manager'].fetch_data(
             symbols='AAPL',
             start_date=start_date,
@@ -111,25 +109,26 @@ class TestDataPipelineIntegration:
         """Test error handling across the pipeline"""
         pipeline = setup_pipeline
         
-        # Test with invalid symbol
+        # Test with invalid symbol - use fixed historical dates
         with pytest.raises(Exception):
-            current_time = datetime.now()
-            yesterday = current_time.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
-            day_before_yesterday = yesterday - timedelta(days=1)
-            pipeline['market_manager'].fetch_data(  # Changed from fetch_historical_data to fetch_data
-                symbols='INVALID_SYMBOL',  # Changed from symbol to symbols
-                start_date=day_before_yesterday,
-                end_date=yesterday
+            # Use known historical dates
+            end_date = datetime(2023, 5, 1)
+            start_date = datetime(2023, 4, 1)
+            pipeline['market_manager'].fetch_data(
+                symbols='INVALID_SYMBOL',
+                start_date=start_date,
+                end_date=end_date
             )
         
-        # Test with invalid date range
+        # Test with invalid date range - use fixed historical dates
         with pytest.raises(Exception):
-            current_time = datetime.now()
-            yesterday = current_time.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
-            pipeline['market_manager'].fetch_data(  # Changed from fetch_historical_data to fetch_data
-                symbols='AAPL',  # Changed from symbol to symbols
-                start_date=yesterday,
-                end_date=yesterday - timedelta(days=1)  # End date before start date
+            # Use end date before start date
+            end_date = datetime(2023, 4, 1)
+            start_date = datetime(2023, 5, 1)
+            pipeline['market_manager'].fetch_data(
+                symbols='AAPL',
+                start_date=start_date,
+                end_date=end_date  # End date before start date
             )
         
         # Test with empty market data
@@ -141,11 +140,9 @@ class TestDataPipelineIntegration:
         """Test data consistency across the pipeline"""
         pipeline = setup_pipeline
         
-        # 1. Get market data - fetch 26 weeks for weekly data
-        # Use yesterday's date to ensure we're working with historical data
-        current_time = datetime.now()
-        end_date = current_time.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
-        start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks
+        # 1. Get market data - use fixed historical dates
+        end_date = datetime(2023, 5, 1)  # Fixed historical date
+        start_date = datetime(2022, 11, 1)  # ~6 months before end_date
         
         # Log the dates for debugging
         print(f"\nTest dates - Start: {start_date}, End: {end_date}")
