@@ -45,7 +45,7 @@ class TestDataPipelineIntegration:
         pipeline = setup_pipeline
         
         # 1. Fetch market data - fetch 26 weeks to ensure enough weekly data points
-        end_date = datetime.now()
+        end_date = datetime.now() - timedelta(days=1)  # Use yesterday's date
         start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks for weekly data
         market_data = pipeline['market_manager'].fetch_data(
             symbols='AAPL',
@@ -80,7 +80,7 @@ class TestDataPipelineIntegration:
         pipeline = setup_pipeline
         
         # 1. Fetch market data - fetch 26 weeks for weekly data
-        end_date = datetime.now()
+        end_date = datetime.now() - timedelta(days=1)  # Use yesterday's date
         start_date = end_date - timedelta(weeks=26)  # Changed to 26 weeks
         market_data = pipeline['market_manager'].fetch_data(
             symbols='AAPL',
