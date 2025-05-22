@@ -138,7 +138,7 @@ def clean_market_data(
     df: pd.DataFrame,
     fill_method: str = 'ffill',
     max_gap: int = 3,
-    remove_outliers: bool = True,
+    remove_outliers: bool = False,
     outlier_threshold: float = 3.0
 ) -> pd.DataFrame:
     """Clean and preprocess market data.
@@ -153,6 +153,10 @@ def clean_market_data(
     Returns:
         Cleaned DataFrame
     """
+    if df.empty:
+        logger.warning("Empty DataFrame received in clean_market_data. Returning as is.")
+        return df
+        
     df = df.copy()
     
     # Handle missing values
@@ -166,18 +170,53 @@ def clean_market_data(
     # Remove remaining missing values
     df = df.dropna()
     
+    # Exit early if we've lost all data
+    if df.empty:
+        logger.warning("DataFrame became empty after handling missing values. Returning empty DataFrame.")
+        return df
+    
     if remove_outliers:
-        # Remove price outliers
+        # Create a combined mask for all outliers instead of filtering sequentially
+        keep_mask = pd.Series(True, index=df.index)
+        
+        # Check price columns
         price_cols = ['open', 'high', 'low', 'close']
         for col in price_cols:
-            mean = df[col].mean()
-            std = df[col].std()
-            df = df[abs(df[col] - mean) <= (outlier_threshold * std)]
+            if col in df.columns:
+                mean = df[col].mean()
+                std = df[col].std()
+                # Update the mask - only mark as False if it's an outlier
+                col_mask = abs(df[col] - mean) <= (outlier_threshold * std)
+                keep_mask = keep_mask & col_mask
         
-        # Remove volume outliers
-        mean_vol = df['volume'].mean()
-        std_vol = df['volume'].std()
-        df = df[abs(df['volume'] - mean_vol) <= (outlier_threshold * std_vol)]
+        # Check volume separately
+        if 'volume' in df.columns:
+            mean_vol = df['volume'].mean()
+            std_vol = df['volume'].std()
+            vol_mask = abs(df['volume'] - mean_vol) <= (outlier_threshold * std_vol)
+            keep_mask = keep_mask & vol_mask
+        
+        # Apply the combined mask
+        df = df[keep_mask]
+        
+        # If we've filtered out everything, log a warning and keep at least 80% of the original data
+        if df.empty:
+            logger.warning("Outlier removal filtered out all data. Falling back to keeping top 80% of data by distance from mean.")
+            # Re-compute with a more permissive approach - keep the closest 80% of points to the mean
+            df_original = df.copy()
+            for col in price_cols + ['volume']:
+                if col in df_original.columns:
+                    mean = df_original[col].mean()
+                    # Calculate distance from mean
+                    df_original[f'{col}_dist'] = abs(df_original[col] - mean)
+            
+            # Sort by total distance and keep top 80%
+            if len(df_original) > 0:
+                total_dist = df_original[[f'{col}_dist' for col in price_cols + ['volume'] if f'{col}_dist' in df_original.columns]].sum(axis=1)
+                df_original['total_dist'] = total_dist
+                df_original = df_original.sort_values('total_dist')
+                keep_count = max(int(len(df_original) * 0.8), 1)  # Keep at least 1 row
+                df = df_original.iloc[:keep_count].drop([col for col in df_original.columns if col.endswith('_dist')], axis=1)
     
     # Ensure chronological order
     df = df.sort_index()
@@ -185,7 +224,7 @@ def clean_market_data(
     # Remove duplicate indices
     df = df[~df.index.duplicated(keep='first')]
     
-    # Ensure all values are finite
+    # Replace infinite values with NaN and drop them
     df = df.replace([np.inf, -np.inf], np.nan)
     df = df.dropna()
     

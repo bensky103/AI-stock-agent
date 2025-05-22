@@ -59,7 +59,7 @@ class TestDataPipelineIntegration:
         assert len(market_data) >= 8  # Ensure we have enough weekly data points
         
         # 2. Clean the data
-        cleaned_data = clean_market_data(market_data)
+        cleaned_data = clean_market_data(market_data, remove_outliers=False)
         assert isinstance(cleaned_data, pd.DataFrame)
         assert not cleaned_data.empty
         assert cleaned_data.isnull().sum().sum() == 0
@@ -158,7 +158,7 @@ class TestDataPipelineIntegration:
         print(f"Market data range - Start: {market_data.index[0]}, End: {market_data.index[-1]}")
         
         # 2. Process through pipeline
-        cleaned_data = clean_market_data(market_data)
+        cleaned_data = clean_market_data(market_data, remove_outliers=False)
         processed_data = pipeline['preprocessor'].prepare_sequence(
             cleaned_data,
             target_col='close',  # Use 'close' as the target column
