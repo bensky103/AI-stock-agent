@@ -8,6 +8,7 @@ from data_input.news_sentiment import NewsSentimentAnalyzer
 from prediction_engine.sequence_preprocessor import SequencePreprocessor
 from data_input.market_utils import clean_market_data
 from pathlib import Path
+import pytz
 
 class TestDataPipelineIntegration:
     @pytest.fixture
@@ -45,8 +46,8 @@ class TestDataPipelineIntegration:
         pipeline = setup_pipeline
         
         # 1. Fetch market data - use fixed historical dates instead of relative dates
-        end_date = datetime(2023, 5, 1)  # Fixed historical date
-        start_date = datetime(2022, 11, 1)  # ~6 months before end_date
+        end_date = datetime(2023, 5, 1, tzinfo=pytz.UTC)  # Fixed historical date with UTC timezone
+        start_date = datetime(2022, 11, 1, tzinfo=pytz.UTC)  # ~6 months before end_date
         market_data = pipeline['market_manager'].fetch_data(
             symbols='AAPL',
             start_date=start_date,
@@ -80,8 +81,8 @@ class TestDataPipelineIntegration:
         pipeline = setup_pipeline
         
         # 1. Fetch market data - use fixed historical dates
-        end_date = datetime(2023, 5, 1)  # Fixed historical date
-        start_date = datetime(2022, 11, 1)  # ~6 months before end_date
+        end_date = datetime(2023, 5, 1, tzinfo=pytz.UTC)  # Fixed historical date with UTC timezone
+        start_date = datetime(2022, 11, 1, tzinfo=pytz.UTC)  # ~6 months before end_date
         market_data = pipeline['market_manager'].fetch_data(
             symbols='AAPL',
             start_date=start_date,
@@ -112,8 +113,8 @@ class TestDataPipelineIntegration:
         # Test with invalid symbol - use fixed historical dates
         with pytest.raises(Exception):
             # Use known historical dates
-            end_date = datetime(2023, 5, 1)
-            start_date = datetime(2023, 4, 1)
+            end_date = datetime(2023, 5, 1, tzinfo=pytz.UTC)
+            start_date = datetime(2023, 4, 1, tzinfo=pytz.UTC)
             pipeline['market_manager'].fetch_data(
                 symbols='INVALID_SYMBOL',
                 start_date=start_date,
@@ -123,8 +124,8 @@ class TestDataPipelineIntegration:
         # Test with invalid date range - use fixed historical dates
         with pytest.raises(Exception):
             # Use end date before start date
-            end_date = datetime(2023, 4, 1)
-            start_date = datetime(2023, 5, 1)
+            end_date = datetime(2023, 4, 1, tzinfo=pytz.UTC)
+            start_date = datetime(2023, 5, 1, tzinfo=pytz.UTC)
             pipeline['market_manager'].fetch_data(
                 symbols='AAPL',
                 start_date=start_date,
@@ -141,8 +142,8 @@ class TestDataPipelineIntegration:
         pipeline = setup_pipeline
         
         # 1. Get market data - use fixed historical dates
-        end_date = datetime(2023, 5, 1)  # Fixed historical date
-        start_date = datetime(2022, 11, 1)  # ~6 months before end_date
+        end_date = datetime(2023, 5, 1, tzinfo=pytz.UTC)  # Fixed historical date with UTC timezone
+        start_date = datetime(2022, 11, 1, tzinfo=pytz.UTC)  # ~6 months before end_date
         
         # Log the dates for debugging
         print(f"\nTest dates - Start: {start_date}, End: {end_date}")
