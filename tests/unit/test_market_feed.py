@@ -288,6 +288,25 @@ def test_market_feed_integration(sample_config):
     # Test data fetching with multiple symbols
     symbols = ['AAPL', 'MSFT']
     try:
+        # First, try to get raw data directly from yfinance to verify data availability
+        print("\nChecking raw data availability:")
+        for symbol in symbols:
+            ticker = yf.Ticker(symbol)
+            raw_data = ticker.history(
+                start=start_date,
+                end=end_date,
+                auto_adjust=False,
+                prepost=False
+            )
+            print(f"\nRaw data for {symbol}:")
+            print(f"Shape: {raw_data.shape}")
+            print(f"Columns: {raw_data.columns.tolist()}")
+            print(f"Index type: {type(raw_data.index)}")
+            print(f"First few rows:\n{raw_data.head()}")
+            print(f"NaN counts:\n{raw_data.isna().sum()}")
+        
+        # Now try the full fetch_data call
+        print("\nAttempting full data fetch with indicators...")
         df = feed.fetch_data(
             symbols=symbols,
             start_date=start_date,
