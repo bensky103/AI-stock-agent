@@ -124,28 +124,52 @@ class MLHybridStrategy(TradingStrategy):
             
             # RSI signals
             if 'RSI' in data:
-                if data['RSI'] > 70:
+                rsi_value = data['RSI']
+                if isinstance(rsi_value, pd.Series):
+                    rsi_value = rsi_value.item()
+                if rsi_value > 70:
                     signals['rsi'] = -1  # Overbought
-                elif data['RSI'] < 30:
+                elif rsi_value < 30:
                     signals['rsi'] = 1   # Oversold
             
             # MACD signals - using signal line instead of shift
             if all(x in data for x in ['MACD', 'MACD_Signal']):
-                if data['MACD'] > data['MACD_Signal']:
+                macd_value = data['MACD']
+                macd_signal_value = data['MACD_Signal']
+                if isinstance(macd_value, pd.Series):
+                    macd_value = macd_value.item()
+                if isinstance(macd_signal_value, pd.Series):
+                    macd_signal_value = macd_signal_value.item()
+                
+                if macd_value > macd_signal_value:
                     signals['macd'] = 1  # Bullish
-                elif data['MACD'] < data['MACD_Signal']:
+                elif macd_value < macd_signal_value:
                     signals['macd'] = -1  # Bearish
             
             # Moving average signals
             if all(x in data for x in ['SMA_20', 'SMA_50']):
-                if data['SMA_20'] > data['SMA_50']:
+                sma20_value = data['SMA_20']
+                sma50_value = data['SMA_50']
+                if isinstance(sma20_value, pd.Series):
+                    sma20_value = sma20_value.item()
+                if isinstance(sma50_value, pd.Series):
+                    sma50_value = sma50_value.item()
+                
+                if sma20_value > sma50_value:
                     signals['ma'] = 1  # Bullish
-                elif data['SMA_20'] < data['SMA_50']:
+                elif sma20_value < sma50_value:
                     signals['ma'] = -1  # Bearish
             
             # Volume signals
             if 'Volume_MA' in data and volume_col in data:
-                if data[volume_col] > data['Volume_MA'] * 1.5:
+                volume_value = data[volume_col]
+                volume_ma_value = data['Volume_MA']
+                if isinstance(volume_value, pd.Series):
+                    volume_value = volume_value.item()
+                if isinstance(volume_ma_value, pd.Series):
+                    volume_ma_value = volume_ma_value.item()
+                
+                if volume_value > volume_ma_value * 1.5:
                     signals['volume'] = 1  # High volume
                     
         except Exception as e:
