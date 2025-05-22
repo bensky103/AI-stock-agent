@@ -113,29 +113,44 @@ def main():
     # 3. Initialize and train predictor
     try:
         predictor = EnhancedStockPredictor(
-            model_type='lstm',  # Using LSTM as default
+            model_type='tft',  # Using TFT as it's the only supported model type
             sequence_length=config['model']['sequence_length'],
             prediction_horizon=config['model']['prediction_horizon']
         )
         
-        # Simple feature split - assuming market_data has proper features
-        features = market_data.drop('close', axis=1, errors='ignore')
-        target = market_data['close'] if 'close' in market_data.columns else None
+        # Get symbol from config
+        symbol = config['market_data']['symbols'][0] if isinstance(config['market_data']['symbols'], list) else config['market_data']['symbols']
         
-        if target is not None:
-            # Train model
-            logger.info("Training model...")
-            predictor.train(features, target)
-            
-            # Make predictions
-            logger.info("Making predictions...")
-            predictions = predictor.predict(features.iloc[-1:])
-            
-            # Save predictions
-            save_predictions(predictions, config['output']['predictions_path'])
-            logger.info("Prediction process complete")
-        else:
-            logger.error("Target column 'close' not found in market data")
+        # Set date range for training
+        end_date = datetime.now(pytz.UTC) - timedelta(days=1)
+        start_date = end_date - timedelta(days=365)  # One year of training data
+        
+        # Convert to string format
+        end_date_str = end_date.strftime('%Y-%m-%d')
+        start_date_str = start_date.strftime('%Y-%m-%d')
+        
+        # Train model with correct parameters
+        logger.info("Training model...")
+        history = predictor.train(
+            symbols=[symbol],
+            start_date=start_date_str,
+            end_date=end_date_str,
+            epochs=config['training']['epochs'],
+            batch_size=config['training']['batch_size']
+        )
+        
+        # Make predictions with correct parameters
+        logger.info("Making predictions...")
+        predictions = predictor.predict(
+            symbols=[symbol],
+            # Use last month for prediction
+            start_date=(end_date - timedelta(days=30)).strftime('%Y-%m-%d'),
+            end_date=end_date_str
+        )
+        
+        # Save predictions
+        save_predictions(predictions, config['output']['predictions_path'])
+        logger.info("Prediction process complete")
     
     except Exception as e:
         logger.error(f"Error in prediction process: {e}")
