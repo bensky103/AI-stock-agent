@@ -222,62 +222,96 @@ def resample_market_data(
         # Reset the index to make datetime a column
         df = df.reset_index()
         
-        # Extract base column names from flattened format (e.g., 'open_AAPL' -> 'open')
-        base_cols = {}
-        for col in df.columns:
-            if col in index_names:  # Skip index columns
-                continue
-            parts = col.split('_', 1)
-            if len(parts) == 2:
-                base_col, symbol = parts
-                if base_col not in base_cols:
-                    base_cols[base_col] = []
-                base_cols[base_col].append(col)
+        # Check if we have flattened column names (e.g., 'open_AAPL')
+        has_flattened_cols = any('_' in col for col in df.columns if col not in index_names)
         
-        # Ensure we have the required columns
-        required_cols = ['open', 'high', 'low', 'close', 'volume']
-        missing_cols = [col for col in required_cols if col not in base_cols]
-        if missing_cols:
-            raise MarketDataError(f"Missing required columns for resampling: {missing_cols}")
-        
-        # Create a dictionary mapping each base column to its aggregation function
-        agg_dict_flat = {}
-        for base_col, cols in base_cols.items():
-            if base_col in agg_dict:
-                for col in cols:
-                    agg_dict_flat[col] = agg_dict[base_col]
-        
-        # Group by symbol and resample each group
-        resampled_dfs = []
-        for symbol in df['symbol'].unique():
-            # Get data for this symbol
-            symbol_data = df[df['symbol'] == symbol].copy()
+        if has_flattened_cols:
+            # Extract base column names from flattened format (e.g., 'open_AAPL' -> 'open')
+            base_cols = {}
+            for col in df.columns:
+                if col in index_names:  # Skip index columns
+                    continue
+                parts = col.split('_', 1)
+                if len(parts) == 2:
+                    base_col, symbol = parts
+                    if base_col not in base_cols:
+                        base_cols[base_col] = []
+                    base_cols[base_col].append(col)
+            
+            # Ensure we have the required columns
+            required_cols = ['open', 'high', 'low', 'close', 'volume']
+            missing_cols = [col for col in required_cols if col not in base_cols]
+            if missing_cols:
+                raise MarketDataError(f"Missing required columns for resampling: {missing_cols}")
+            
+            # Create a dictionary mapping each base column to its aggregation function
+            agg_dict_flat = {}
+            for base_col, cols in base_cols.items():
+                if base_col in agg_dict:
+                    for col in cols:
+                        agg_dict_flat[col] = agg_dict[base_col]
+            
+            # Group by symbol and resample each group
+            resampled_dfs = []
+            for symbol in df['symbol'].unique():
+                # Get data for this symbol
+                symbol_data = df[df['symbol'] == symbol].copy()
+                
+                # Ensure datetime is in UTC
+                symbol_data['datetime'] = pd.to_datetime(symbol_data['datetime']).dt.tz_localize('UTC')
+                
+                # Set datetime as index for resampling
+                symbol_data = symbol_data.set_index('datetime')
+                
+                # Resample the data with market open time (14:30 UTC)
+                resampled = symbol_data.resample(
+                    interval,
+                    offset='14H30min'  # Align to market open (14:30 UTC)
+                ).agg(agg_dict_flat)
+                
+                # Reset index to make datetime a column again
+                resampled = resampled.reset_index()
+                
+                # Add symbol column back
+                resampled['symbol'] = symbol
+                
+                resampled_dfs.append(resampled)
+            
+            # Combine all resampled data
+            result = pd.concat(resampled_dfs, ignore_index=True)
+            
+            # Set the MultiIndex back
+            result = result.set_index(['symbol', 'datetime'])
+            
+        else:
+            # Handle simple column names (e.g., 'open', 'high', etc.)
+            # Ensure we have the required columns
+            required_cols = ['open', 'high', 'low', 'close', 'volume']
+            missing_cols = [col for col in required_cols if col not in df.columns]
+            if missing_cols:
+                raise MarketDataError(f"Missing required columns for resampling: {missing_cols}")
             
             # Ensure datetime is in UTC
-            symbol_data['datetime'] = pd.to_datetime(symbol_data['datetime']).dt.tz_localize('UTC')
+            df['datetime'] = pd.to_datetime(df['datetime']).dt.tz_localize('UTC')
             
             # Set datetime as index for resampling
-            symbol_data = symbol_data.set_index('datetime')
+            df = df.set_index('datetime')
             
             # Resample the data with market open time (14:30 UTC)
-            resampled = symbol_data.resample(
+            result = df.resample(
                 interval,
                 offset='14H30min'  # Align to market open (14:30 UTC)
-            ).agg(agg_dict_flat)
+            ).agg(agg_dict)
             
             # Reset index to make datetime a column again
-            resampled = resampled.reset_index()
+            result = result.reset_index()
             
-            # Add symbol column back
-            resampled['symbol'] = symbol
-            
-            resampled_dfs.append(resampled)
-        
-        # Combine all resampled data
-        result = pd.concat(resampled_dfs, ignore_index=True)
-        
-        # Set the MultiIndex back
-        result = result.set_index(['symbol', 'datetime'])
+            # Add symbol column if it exists
+            if 'symbol' in df.columns:
+                result['symbol'] = df['symbol'].iloc[0]
+                result = result.set_index(['symbol', 'datetime'])
+            else:
+                result = result.set_index('datetime')
         
         return result
         
