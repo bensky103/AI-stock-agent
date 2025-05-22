@@ -215,18 +215,35 @@ def resample_market_data(
             'volume': 'sum'
         }
     
+    # Extract base column names from flattened format (e.g., 'open_AAPL' -> 'open')
+    base_cols = {}
+    for col in df.columns:
+        parts = col.split('_', 1)
+        if len(parts) == 2:
+            base_col, symbol = parts
+            if base_col not in base_cols:
+                base_cols[base_col] = []
+            base_cols[base_col].append(col)
+    
     # Ensure we have the required columns
     required_cols = ['open', 'high', 'low', 'close', 'volume']
-    missing_cols = [col for col in required_cols if col not in df.columns]
+    missing_cols = [col for col in required_cols if col not in base_cols]
     if missing_cols:
         raise MarketDataError(f"Missing required columns for resampling: {missing_cols}")
     
     try:
+        # Create a dictionary mapping each base column to its aggregation function
+        agg_dict_flat = {}
+        for base_col, cols in base_cols.items():
+            if base_col in agg_dict:
+                for col in cols:
+                    agg_dict_flat[col] = agg_dict[base_col]
+        
         # Resample without any offset to preserve original timestamps
         resampler = df.resample(interval)
         
-        # Apply aggregations
-        resampled = resampler.agg(agg_dict)
+        # Apply aggregations using the flattened column names
+        resampled = resampler.agg(agg_dict_flat)
         
         return resampled
         
