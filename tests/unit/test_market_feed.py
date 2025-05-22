@@ -287,14 +287,21 @@ def test_market_feed_integration(mock_ticker, sample_config, sample_market_data)
         # First ensure we have the exact column names from yfinance
         df.columns = ['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']
         df.index.name = 'Date'
+        
+        # Verify the data is valid before mocking
+        assert not df['Open'].isna().all(), "Open prices should not be all NaN"
+        assert not df['High'].isna().all(), "High prices should not be all NaN"
+        assert not df['Low'].isna().all(), "Low prices should not be all NaN"
+        assert not df['Close'].isna().all(), "Close prices should not be all NaN"
+        assert not df['Volume'].isna().all(), "Volume should not be all NaN"
     
     # Mock Ticker.history to return different data for each symbol
     def mock_history_side_effect(*args, **kwargs):
         symbol = mock_ticker.call_args[0][0]  # Get the symbol from Ticker constructor
         if symbol == 'AAPL':
-            return aapl_data  # Return the original DataFrame with yfinance column names
+            return aapl_data.copy()  # Return a copy to prevent modification
         elif symbol == 'MSFT':
-            return msft_data  # Return the original DataFrame with yfinance column names
+            return msft_data.copy()  # Return a copy to prevent modification
         return pd.DataFrame()
     
     mock_ticker_instance = MagicMock()
@@ -321,8 +328,16 @@ def test_market_feed_integration(mock_ticker, sample_config, sample_market_data)
     assert ('MSFT', pd.Timestamp('2024-01-02')) in df.index
     
     # Check basic columns
+    assert ('open', 'AAPL') in df.columns
+    assert ('open', 'MSFT') in df.columns
+    assert ('high', 'AAPL') in df.columns
+    assert ('high', 'MSFT') in df.columns
+    assert ('low', 'AAPL') in df.columns
+    assert ('low', 'MSFT') in df.columns
     assert ('close', 'AAPL') in df.columns
     assert ('close', 'MSFT') in df.columns
+    assert ('volume', 'AAPL') in df.columns
+    assert ('volume', 'MSFT') in df.columns
     
     # Check technical indicators
     assert ('sma_20', 'AAPL') in df.columns
@@ -334,7 +349,11 @@ def test_market_feed_integration(mock_ticker, sample_config, sample_market_data)
     for symbol in ['AAPL', 'MSFT']:
         symbol_data = df.xs(symbol, level='symbol')
         assert not symbol_data.empty
-        assert not symbol_data[('close', symbol)].isna().all()
-        assert not symbol_data[('sma_20', symbol)].isna().all()
-        assert not symbol_data[('rsi', symbol)].isna().all()
+        assert not symbol_data[('open', symbol)].isna().all(), f"Open prices for {symbol} should not be all NaN"
+        assert not symbol_data[('high', symbol)].isna().all(), f"High prices for {symbol} should not be all NaN"
+        assert not symbol_data[('low', symbol)].isna().all(), f"Low prices for {symbol} should not be all NaN"
+        assert not symbol_data[('close', symbol)].isna().all(), f"Close prices for {symbol} should not be all NaN"
+        assert not symbol_data[('volume', symbol)].isna().all(), f"Volume for {symbol} should not be all NaN"
+        assert not symbol_data[('sma_20', symbol)].isna().all(), f"SMA20 for {symbol} should not be all NaN"
+        assert not symbol_data[('rsi', symbol)].isna().all(), f"RSI for {symbol} should not be all NaN"
 
