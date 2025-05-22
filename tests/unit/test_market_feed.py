@@ -43,7 +43,7 @@ def sample_config(tmp_path):
 @pytest.fixture
 def sample_market_data():
     """Create sample market data for testing."""
-    dates = pd.date_range(start='2024-01-01', end='2024-01-31', freq='D')
+    dates = pd.date_range(start='2024-01-02', end='2024-01-31', freq='D')
     
     # Generate base prices with a slight upward trend
     base_prices = np.linspace(100, 105, len(dates))
@@ -112,14 +112,14 @@ def test_get_market_data_single_symbol(mock_download, sample_config, sample_mark
     
     df = get_market_data(
         symbols=['AAPL'],
-        start_date='2024-01-01',
+        start_date='2024-01-02',
         end_date='2024-01-31',
         interval='1d',
         config_path=sample_config
     )
     
     assert isinstance(df, pd.DataFrame)
-    assert ('AAPL', pd.Timestamp('2024-01-01')) in df.index
+    assert ('AAPL', pd.Timestamp('2024-01-02')) in df.index
     assert all(col in df.columns for col in ['open', 'high', 'low', 'close', 'adj_close', 'volume'])
     mock_download.assert_called_once()
 
@@ -142,7 +142,7 @@ def test_get_market_data_multiple_symbols(mock_download, sample_config, sample_m
     
     df = get_market_data(
         symbols=['AAPL', 'MSFT'],
-        start_date='2024-01-01',
+        start_date='2024-01-02',
         end_date='2024-01-31',
         interval='1d',
         config_path=sample_config
@@ -150,8 +150,8 @@ def test_get_market_data_multiple_symbols(mock_download, sample_config, sample_m
     
     assert isinstance(df, pd.DataFrame)
     assert not df.empty
-    assert ('AAPL', pd.Timestamp('2024-01-01')) in df.index
-    assert ('MSFT', pd.Timestamp('2024-01-01')) in df.index
+    assert ('AAPL', pd.Timestamp('2024-01-02')) in df.index
+    assert ('MSFT', pd.Timestamp('2024-01-02')) in df.index
     assert ('close', 'AAPL') in df.columns
     assert ('close', 'MSFT') in df.columns
 
@@ -164,7 +164,7 @@ def test_get_market_data_error_handling(mock_download, sample_config):
     with pytest.raises(Exception):
         get_market_data(
             symbols=['AAPL'],
-            start_date='2024-01-01',
+            start_date='2024-01-02',
             end_date='2024-01-31',
             config_path=sample_config
         )
@@ -260,7 +260,7 @@ def test_market_feed_fetch_data(mock_ticker, sample_config, sample_market_data):
     feed = MarketFeed(config_path=sample_config)
     df = feed.fetch_data(
         symbols=['AAPL'],
-        start_date='2024-01-01',
+        start_date='2024-01-02',
         end_date='2024-01-31'
     )
     
@@ -314,7 +314,7 @@ def test_market_feed_integration(mock_ticker, sample_config, sample_market_data)
     symbols = ['AAPL', 'MSFT']
     df = feed.fetch_data(
         symbols=symbols,
-        start_date='2024-01-01',
+        start_date='2024-01-02',
         end_date='2024-01-31',
         add_indicators=True
     )

@@ -709,7 +709,7 @@ def main():
         # Fetch historical data
         df = feed.get_market_data(
             symbols=['AAPL', 'MSFT'],
-            start_date='2024-01-01',
+            start_date='2024-01-02',
             interval='1d'
         )
         
