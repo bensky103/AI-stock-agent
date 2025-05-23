@@ -157,71 +157,66 @@ class TFTPredictor:
     def preprocess_data(self, df):
         """
         Preprocess input data for the TFT model.
+        This method might be used if TFTPredictor.predict() is called directly
+        with a raw DataFrame that needs standard preprocessing before hitting
+        a PyTorch Forecasting like model. 
+        For the __call__ path with a Keras model, this is likely bypassed if __call__
+        formats the DataFrame completely.
         
         Args:
             df (pd.DataFrame): Input DataFrame, indexed by group ID and time ID.
             
         Returns:
-            dict: Processed data ready for the custom TFT model's predict method.
+            dict: Processed data ready for a PyTorch Forecasting style TFT model's predict method.
             
         Raises:
             TFTPredictorError: If data cannot be preprocessed
         """
         try:
-            # Get column names from hparams
-            # Ensure model and hparams are loaded; _load_model typically ensures self.model is set.
             if self.model is None or not hasattr(self.model, 'hparams'):
-                 # Attempt to load the model if not already loaded to access hparams
                 logger.info("Model or hparams not available in preprocess_data, attempting to load model.")
-                self._load_model() # This should set self.model
+                self._load_model() 
                 if self.model is None or not hasattr(self.model, 'hparams'):
-                    raise TFTPredictorError("Failed to load model or model.hparams for preprocess_data.")
+                    # If still no hparams (e.g. Keras model), this path might not be usable.
+                    logger.warning("Model.hparams not available after load; preprocess_data might not function as expected for PyTorch Forecasting models.")
+                    # For a Keras model, self.model.hparams might not exist. 
+                    # Fallback to model_config if hparams are PyTorch Forecasting specific.
+                    gid_col_name = self.model_config.get("model_config", {}).get("identifier_col_name", "symbol")
+                    tid_col_name = self.model_config.get("model_config", {}).get("time_idx_col_name", "time_idx")
+                    time_varying_unknown_reals = self.model_config.get("model_config", {}).get("time_varying_unknown_reals", [])
+                else:
+                    gid_col_name = self.model.hparams.get("group_ids", ["symbol"])[0]
+                    tid_col_name = self.model.hparams.get("time_idx", "time_idx")
+                    time_varying_unknown_reals = self.model.hparams.get("time_varying_unknown_reals", [])
+            else: # hparams exist
+                gid_col_name = self.model.hparams.get("group_ids", ["symbol"])[0]
+                tid_col_name = self.model.hparams.get("time_idx", "time_idx")
+                time_varying_unknown_reals = self.model.hparams.get("time_varying_unknown_reals", [])
 
-            gid_col_name = self.model.hparams.get("group_ids", ["symbol"])[0]
-            tid_col_name = self.model.hparams.get("time_idx", "time_idx")
-            time_varying_unknown_reals = self.model.hparams.get("time_varying_unknown_reals", [])
-
-            # Validate input data
-            if df.empty: # df is indexed here
+            if df.empty:
                 raise TFTPredictorError("Input DataFrame is empty for preprocess_data")
-            
-            # The df passed from __call__ is a single row for the last known point.
-            # The model itself will fetch historical context.
-            # The context_length check on this specific df is not appropriate here.
 
-            # Validate that all expected real-valued features are columns in df
-            # df.columns here are the feature names (and target names) as df is indexed
             missing_reals = [col for col in time_varying_unknown_reals if col not in df.columns]
             if missing_reals:
                 raise TFTPredictorError(
-                    f"Missing required time_varying_unknown_reals columns in the input DataFrame for preprocess_data: {missing_reals}. "
-                    f"Available columns: {df.columns.tolist()}. Expected from hparams: {time_varying_unknown_reals}. "
-                    "Check feature mapping in __call__ and ensure model hparams are correct."
+                    f"Missing required time_varying_unknown_reals in df for preprocess_data: {missing_reals}. "
+                    f"Available: {df.columns.tolist()}. Expected: {time_varying_unknown_reals}."
                 )
 
-            # Add checks for other types of features if necessary (known reals, categoricals etc.)
-            # based on what self.model.hparams specifies and what the custom TFTModel wrapper expects.
+            df_flat = df.reset_index()
 
-            df_flat = df.reset_index() # This makes gid_col_name and tid_col_name regular columns
-
-            # Ensure the time column is of a numerical type expected by the model (e.g., int64 for timestamps)
             if tid_col_name in df_flat:
                 if not pd.api.types.is_numeric_dtype(df_flat[tid_col_name]):
-                    logger.warning(f"Time column '{tid_col_name}' is not numeric ({df_flat[tid_col_name].dtype}). Attempting conversion or ensure it's correctly formatted.")
-                    # Attempt conversion if obviously a timestamp-like float, otherwise error or pass through
-                    # This depends on what the custom TFTModel's predict method expects for its 'time' field
+                    logger.warning(f"Time column '{tid_col_name}' is not numeric ({df_flat[tid_col_name].dtype}).")
                 time_values = df_flat[tid_col_name].values
-                # Example: if timestamps are float but need to be int
-                # if pd.api.types.is_float_dtype(time_values):
-                #    time_values = time_values.astype(np.int64)
             else:
-                raise TFTPredictorError(f"Time index column '{tid_col_name}' not found in flattened DataFrame.")
+                raise TFTPredictorError(f"Time index column '{tid_col_name}' not found in flattened DataFrame for preprocess_data.")
 
             if gid_col_name not in df_flat:
-                raise TFTPredictorError(f"Group ID column '{gid_col_name}' not found in flattened DataFrame.")
+                raise TFTPredictorError(f"Group ID column '{gid_col_name}' not found in flattened DataFrame for preprocess_data.")
 
             processed_data = {
-                "inputs": df_flat, # This df_flat now contains gid, tid, and all feature/target columns.
+                "inputs": df_flat, 
                 "time": time_values, 
                 "identifier": df_flat[gid_col_name].values
             }
@@ -236,56 +231,97 @@ class TFTPredictor:
     def predict(self, df):
         """
         Make predictions using the TFT model.
+        The __call__ method is now the primary path for sequence prediction and prepares the DataFrame.
+        This method passes the already formatted DataFrame to the model.
         
         Args:
-            df (pd.DataFrame): Input DataFrame with MultiIndex (symbol, datetime)
+            df (pd.DataFrame): Input DataFrame, expected to be formatted correctly 
+                               for the self.model.predict() call (e.g. by __call__).
             
         Returns:
-            dict: Dictionary containing predictions and metadata
+            dict: Dictionary containing predictions and metadata (structure adapted for Keras model output).
             
         Raises:
             TFTPredictorError: If prediction fails
         """
         try:
-            # Load model if not already loaded
             if self.model is None:
                 self.model = self._load_model()
             
-            # Validate input
             if df.empty:
-                raise TFTPredictorError("Input DataFrame is empty")
+                raise TFTPredictorError("Input DataFrame for predict() is empty")
             
-            # Preprocess data
-            processed_data = self.preprocess_data(df)
+            logger.info(f"TFTPredictor.predict called with df of shape: {df.shape}. Assuming it's preformatted by __call__ or similar.")
+
+            raw_predictions_output = self.model.predict(df) 
             
-            # Make predictions
-            raw_predictions = self.model.predict(processed_data["inputs"])
-            
-            # Extract median predictions (p50)
-            if 'p50' not in raw_predictions:
-                raise TFTPredictorError("Model did not return p50 predictions")
-            
-            median_predictions = raw_predictions['p50']
-            
-            # Format predictions
-            forecast_dates = median_predictions['forecast_time'].unique()
-            
-            # Extract the actual prediction values
-            prediction_cols = [col for col in median_predictions.columns if col.startswith('t+')]
-            predictions_array = median_predictions[prediction_cols].values
-            
-            # Create a dictionary with the results
-            result = {
-                'predictions': predictions_array,
-                'forecast_dates': forecast_dates,
-                'symbols': median_predictions['identifier'].unique(),
-                'raw_predictions': raw_predictions
-            }
-            
+            if isinstance(raw_predictions_output, np.ndarray):
+                predictions_array = raw_predictions_output 
+                
+                m_config = self.model_config.get("model_config", {})
+                gid_col_name = m_config.get("identifier_col_name", "symbol")
+                tid_col_name = m_config.get("time_idx_col_name", "time_idx")
+
+                num_sequences_in_batch = df[gid_col_name].nunique() if gid_col_name in df else 1
+                pred_horizon = predictions_array.shape[1] if predictions_array.ndim > 1 else (predictions_array.shape[0] if predictions_array.ndim == 1 and num_sequences_in_batch == 1 else 1)
+
+                # Create placeholder forecast dates. For real dates, more context from `df` or `sequence_tensor` would be needed.
+                # This assumes predictions start from the day after the last known time step.
+                # If df contains actual timestamps, those could be used as a basis.
+                last_input_time = df[tid_col_name].max() if tid_col_name in df else pd.Timestamp.now().timestamp()
+                forecast_dates_placeholder = [pd.to_datetime(last_input_time, unit='s') + timedelta(days=i+1) for i in range(pred_horizon)]
+                
+                symbols_placeholder = df[gid_col_name].unique() if gid_col_name in df else [f"DUMMY_GROUP_{k}" for k in range(num_sequences_in_batch)]
+
+                # Adapt raw_predictions_output to fit the old dict structure for 'raw_predictions':{'p50': ...}
+                # This is a simplification. If the Keras model outputs quantiles, they should be mapped here.
+                # For now, assuming the output `predictions_array` is the equivalent of 'p50'.
+                raw_pred_dict_p50_equivalent = predictions_array 
+
+                result = {
+                    'predictions': predictions_array, 
+                    'forecast_dates': forecast_dates_placeholder, 
+                    'symbols': symbols_placeholder, 
+                    'raw_predictions': {'p50': raw_pred_dict_p50_equivalent}
+                }
+                logger.info(f"Formatted numpy predictions. Array shape: {predictions_array.shape}")
+
+            elif isinstance(raw_predictions_output, dict) and 'p50' in raw_predictions_output : # Previous structure
+                # This path is less likely if self.model.predict() returns a numpy array (typical for Keras)
+                # but kept for some compatibility if the custom model still outputs this dict.
+                median_predictions_df = raw_predictions_output['p50']
+                # Check if median_predictions_df is a DataFrame (expected by old code)
+                if isinstance(median_predictions_df, pd.DataFrame):
+                    prediction_cols = [col for col in median_predictions_df.columns if col.startswith('t+')]
+                    predictions_array = median_predictions_df[prediction_cols].values
+                    forecast_dates = median_predictions_df['forecast_time'].unique()
+                    symbols = median_predictions_df['identifier'].unique()
+                # If median_predictions_df is actually the numpy array of predictions directly:
+                elif isinstance(median_predictions_df, np.ndarray):
+                    predictions_array = median_predictions_df
+                    # Placeholders for dates/symbols if not available in this dict structure
+                    pred_horizon = predictions_array.shape[1] if predictions_array.ndim > 1 else predictions_array.shape[0]
+                    forecast_dates = [pd.Timestamp.now() + timedelta(days=i) for i in range(pred_horizon)] # Placeholder
+                    symbols = ["DUMMY_SYMBOL"] # Placeholder
+                else:
+                    raise TFTPredictorError(f"'p50' in raw_predictions_output is not DataFrame or ndarray: {type(median_predictions_df)}")
+
+                result = {
+                    'predictions': predictions_array,
+                    'forecast_dates': forecast_dates,
+                    'symbols': symbols,
+                    'raw_predictions': raw_predictions_output
+                }
+                logger.info("Processed dict predictions (PyTorch Forecasting style).")
+            else:
+                raise TFTPredictorError(f"The custom model.predict() returned an unexpected type or structure: {type(raw_predictions_output)}. Content: {str(raw_predictions_output)[:200]}")
+
             return result
             
         except Exception as e:
             if not isinstance(e, TFTPredictorError):
+                # Log the df shape and head that was passed to self.model.predict()
+                logger.error(f"Error making predictions with df shape {df.shape if 'df' in locals() else 'df not defined'}. Head:\n{df.head() if 'df' in locals() and isinstance(df, pd.DataFrame) else 'N/A'}")
                 raise TFTPredictorError(f"Error making predictions: {str(e)}")
             raise
     
@@ -404,114 +440,95 @@ class TFTPredictor:
         batch_size, seq_len, n_features = sequence_np.shape
         
         try:
-            df_data = []
+            # Ensure model config is loaded to get necessary column names etc.
+            if not hasattr(self, 'model_config') or not self.model_config:
+                self._load_config() # Loads self.model_config
+
+            # Attempt to get column name configurations from self.model_config["model_config"]
+            m_config = self.model_config.get("model_config", {})
+            
+            expected_feature_names = m_config.get("time_varying_unknown_reals", 
+                                       m_config.get("input_obs_loc", 
+                                       m_config.get("input_feature_names", [])))
+            
+            if not expected_feature_names and n_features > 0:
+                logger.warning(
+                    f"Could not find explicit feature names in model_config.json. "
+                    f"Generating generic feature names: feature_0 to feature_{n_features-1}. "
+                    "This is a fallback and might lead to errors if names don't match training."
+                )
+                expected_feature_names = [f'feature_{k}' for k in range(n_features)]
+            
+            if len(expected_feature_names) != n_features:
+                raise TFTPredictorError(
+                    f"Mismatch between number of features in input sequence ({n_features}) "
+                    f"and expected feature names in model_config.json ({len(expected_feature_names)}: {expected_feature_names})."
+                )
+
+            gid_col_name = m_config.get("identifier_col_name", "symbol")
+            tid_col_name = m_config.get("time_idx_col_name", "time_idx")
+            
+            target_col_name_config = m_config.get("target_col_name", "target")
+            if isinstance(target_col_name_config, str):
+                target_names = [target_col_name_config]
+            elif isinstance(target_col_name_config, list):
+                target_names = target_col_name_config
+            else:
+                target_names = ["target"]
+
+            all_dfs_data_for_predict_call = []
             for i in range(batch_size):
-                # For each item in the batch, construct the features for the DataFrame
-                # The original TFT model expects multiple features and known/unknown inputs.
+                df_dict = {}
+                df_dict[tid_col_name] = np.arange(seq_len)
+                df_dict[gid_col_name] = [f'DUMMY_GROUP_{i}'] * seq_len
                 
-                # We take the *last* time step of the sequence to form the input for prediction.
-                current_features = sequence_np[i, -1, :] # Shape: (n_features,)
+                for feature_idx, feature_name in enumerate(expected_feature_names):
+                    df_dict[feature_name] = sequence_np[i, :, feature_idx]
+                    
+                for target_name in target_names:
+                    if target_name not in df_dict:
+                        df_dict[target_name] = np.zeros(seq_len)
 
-                # Ensure current_features is 1D for DataFrame construction if n_features is 1
-                if n_features == 1 and current_features.ndim > 1: 
-                    current_features = current_features.flatten()
-                
-                # These column names MUST match what the TFT model was trained on.
-                # The model's hparams should contain the list of these feature names.
-                # Typically stored in self.model.hparams.time_varying_unknown_reals
-                expected_feature_names = self.model.hparams.get("time_varying_unknown_reals", [])
-                
-                if not expected_feature_names:
-                    # This fallback is risky and assumes a certain number of features if names are not in hparams.
-                    # It's better if hparams always contain the feature names.
-                    logger.warning(
-                        "Feature names ('time_varying_unknown_reals') not found in model hparams. "
-                        "Attempting to proceed with assumed feature names based on n_features. "
-                        "This may lead to errors if the assumption is incorrect."
-                    )
-                    # Placeholder: generate generic names if specific ones aren't found.
-                    # This part might need adjustment based on how features were named during training.
-                    if n_features > 0 :
-                        expected_feature_names = [f'feature_{k}' for k in range(n_features)]
-                        # A common case is that the first feature is 'close' or the target variable.
-                        # If your model was trained with 'close' as the first unknown real, for example:
-                        # expected_feature_names[0] = 'close' # Or whatever the actual target/main feature is.
-                        logger.warning(f"Using generic feature names: {expected_feature_names}")
-                    else: # n_features is 0
-                         raise TFTPredictorError("Cannot proceed with 0 features and no feature names in hparams.")
+                current_sequence_df = pd.DataFrame(df_dict)
+                all_dfs_data_for_predict_call.append(current_sequence_df)
+            
+            final_df_for_model = pd.concat(all_dfs_data_for_predict_call).reset_index(drop=True)
 
+            logger.info(f"Constructed DataFrame for model prediction with shape: {final_df_for_model.shape}")
+            logger.debug(f"DataFrame head for model:\n{final_df_for_model.head()}")
 
-                if len(expected_feature_names) != n_features:
-                    # This error can also occur if the data fed to prepare_features resulted in an unexpected number of feature columns.
-                    raise TFTPredictorError(
-                        f"Mismatch between number of expected (time_varying_unknown_reals) features ({len(expected_feature_names)}) "
-                        f"and actual features provided in sequence ({n_features}). Expected names: {expected_feature_names}. "
-                        "Check data preprocessing and feature engineering steps."
-                    )
+            # Load model if not already loaded (moved from self.predict to here)
+            if self.model is None:
+                self.model = self._load_model()
 
-                row = {
-                    # Standard columns required by PyTorch Forecasting
-                    # The actual group ID column name might be different, check training TimeSeriesDataSet.
-                    self.model.hparams.get("group_ids", ["symbol"])[0]: f'DUMMY_{i}', 
-                    # The actual time index column name might be different.
-                    self.model.hparams.get("time_idx", "time_idx"): pd.Timestamp.now().timestamp(), # Needs to be a numerical time index
-                    # Add any static categorical or real features if model expects them for DUMMY_{i}
-                    # Add any time-varying known features if model expects them
-                }
-                
-                # Populate the time-varying unknown features
-                for idx, feature_name in enumerate(expected_feature_names):
-                    row[feature_name] = current_features[idx]
-                
-                # PyTorch Forecasting also needs a 'target' column for prediction, often set to a dummy value like 0
-                # The actual target column name(s) are in self.model.hparams.target
-                # If it's a multi-target model, all target names must be present.
-                if isinstance(self.model.hparams.target, str):
-                    targets = [self.model.hparams.target]
+            # Pass the fully constructed DataFrame representing the sequence(s)
+            # directly to the custom model's predict method.
+            result = self.model.predict(final_df_for_model)
+            
+            if isinstance(result, np.ndarray):
+                if result.ndim == 1:
+                    predictions_val = result[0]
+                elif result.ndim == 2:
+                    if result.shape[0] == batch_size:
+                         predictions_val = result[0, 0]
+                    else:
+                         predictions_val = result[0,0]
+                elif result.ndim == 3:
+                    predictions_val = result[0, 0, 0]
                 else:
-                    targets = self.model.hparams.target
-                
-                for target_name in targets:
-                    if target_name not in row: # Avoid overwriting if it's also a feature
-                         row[target_name] = 0.0 # Dummy value for prediction input
+                    raise TFTPredictorError(f"Unexpected prediction result ndim: {result.ndim}, shape: {result.shape}")
+                logger.info(f"Extracted prediction value: {predictions_val} from result shape {result.shape}")
+            elif isinstance(result, dict) and 'predictions' in result :
+                predictions_val = result['predictions'][0,0]
+                logger.info(f"Extracted prediction value from dict result: {predictions_val}")
+            else:
+                raise TFTPredictorError(f"Prediction result from custom model is of unexpected type: {type(result)}. Expected numpy array or dict with 'predictions'.")
 
-                df_data.append(row)
+            uncertainty_val = 0.01 # Placeholder
 
-            if not df_data:
-                raise ValueError("Could not construct DataFrame, df_data is empty.")
-
-            df = pd.DataFrame(df_data)
-            # df will have columns for group_id, time_idx, and all features/targets.
-            # These names are taken from hparams earlier in the loop.
-            gid_col_name_from_hparams = self.model.hparams.get("group_ids", ["symbol"])[0]
-            tid_col_name_from_hparams = self.model.hparams.get("time_idx", "time_idx")
-            
-            # Ensure these columns exist before trying to set them as index
-            if gid_col_name_from_hparams not in df.columns:
-                raise TFTPredictorError(f"Group ID column '{gid_col_name_from_hparams}' (from hparams) not found in constructed DataFrame. Columns: {df.columns.tolist()}")
-            if tid_col_name_from_hparams not in df.columns:
-                raise TFTPredictorError(f"Time index column '{tid_col_name_from_hparams}' (from hparams) not found in constructed DataFrame. Columns: {df.columns.tolist()}")
-
-            df.set_index([gid_col_name_from_hparams, tid_col_name_from_hparams], inplace=True)
-            
-            logger.info(f"Constructed DataFrame for prediction with shape: {df.shape}, Index: {df.index.names}")
-            logger.debug(f"DataFrame head:\n{df.head()}")
-
-            # Call the original predict method which expects a DataFrame
-            logger.info("Calling self.predict(df) within __call__")
-            result = self.predict(df) # This calls the TFT model's predict
-            
-            # Extract prediction - assuming it's for the first symbol and first forecast step
-            # The structure of 'result['predictions']' depends on your TFT model output
-            predictions_val = result['predictions'][0, 0] 
-            
-            # For now, we'll use a fixed uncertainty for simplicity
-            uncertainty_val = 0.01  # 1% uncertainty, as a float
-            
             logger.info(f"Prediction: {predictions_val}, Uncertainty: {uncertainty_val}")
             
             import torch
-            # Ensure tensors are 2D: [[value]]
             predictions_tensor = torch.tensor([[predictions_val]], dtype=torch.float32)
             uncertainty_tensor = torch.tensor([[uncertainty_val]], dtype=torch.float32)
             
@@ -519,7 +536,6 @@ class TFTPredictor:
             
         except Exception as e:
             logger.error(f"Error in TFTPredictor call: {str(e)}")
-            # It's often helpful to log the state that led to the error
             logger.error(f"Input sequence_np shape: {sequence_np.shape if 'sequence_np' in locals() else 'not defined'}")
-            logger.error(f"Constructed df_data: {df_data if 'df_data' in locals() else 'not defined'}")
+            logger.error(f"Constructed final_df_for_model (sample):\n{final_df_for_model.head() if 'final_df_for_model' in locals() else 'not defined'}")
             raise TFTPredictorError(f"Failed in TFTPredictor call: {str(e)}") 
