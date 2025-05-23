@@ -663,37 +663,83 @@ class TFTModel:
         if df_normalized.empty:
             raise ValueError("Input DataFrame for _prepare_inputs_from_normalized is empty.")
 
-        known_regular_inputs = []
-        for name in self.config.get('known_regular_inputs', []):
-            known_regular_inputs.append(df_normalized[name].values)
+        # Attempt to get input column configurations
+        config_known_regular = self.config.get('known_regular_inputs', [])
+        config_known_categorical = self.config.get('known_categorical_inputs', [])
+        config_obs_loc = self.config.get('input_obs_loc', [])
+        config_static_loc = self.config.get('static_input_loc', [])
 
-        known_categorical_inputs = []
-        for name in self.config.get('known_categorical_inputs', []):
-            known_categorical_inputs.append(df_normalized[name].values)
+        # Fallback: If no specific input configurations are found,
+        # assume all 'feature_X' columns are observed inputs.
+        if not any([config_known_regular, config_known_categorical, config_obs_loc, config_static_loc]):
+            feature_cols_in_df = [col for col in df_normalized.columns if col.startswith('feature_')]
+            if feature_cols_in_df:
+                logger_grn.warning(
+                    f"[{self.__class__.__name__}] Config missing input specs or columns not found in df. "
+                    f"Defaulting to use all 'feature_X' columns as 'input_obs_loc': {feature_cols_in_df}"
+                )
+                config_obs_loc = feature_cols_in_df # Use all feature_X columns as observed
+            else:
+                logger_grn.warning(
+                    f"[{self.__class__.__name__}] Config missing input specs and no 'feature_X' columns found in df_normalized. "
+                    "Cannot prepare model inputs."
+                )
+        
+        known_regular_inputs_data = []
+        for name in config_known_regular:
+            if name in df_normalized.columns:
+                known_regular_inputs_data.append(df_normalized[name].values)
+            else:
+                logger_grn.debug(f"[{self.__class__.__name__}] Known regular input '{name}' not found in df_normalized columns.")
 
-        # Handle observed inputs (time-varying unknown)
-        obs_inputs = []
-        for name in self.config.get('input_obs_loc', []):
-            obs_inputs.append(df_normalized[name].values)
 
-        # Handle static inputs
-        static_inputs = []
-        for name in self.config.get('static_input_loc', []):
-            static_inputs.append(df_normalized[name].iloc[[0]].values)
+        known_categorical_inputs_data = []
+        for name in config_known_categorical:
+            if name in df_normalized.columns:
+                known_categorical_inputs_data.append(df_normalized[name].values)
+            else:
+                logger_grn.debug(f"[{self.__class__.__name__}] Known categorical input '{name}' not found in df_normalized columns.")
+
+
+        obs_inputs_data = []
+        for name in config_obs_loc:
+            if name in df_normalized.columns:
+                obs_inputs_data.append(df_normalized[name].values)
+            else:
+                logger_grn.debug(f"[{self.__class__.__name__}] Observed input '{name}' ('input_obs_loc') not found in df_normalized columns.")
+                
+
+        static_inputs_data = []
+        for name in config_static_loc:
+            if name in df_normalized.columns:
+                static_inputs_data.append(df_normalized[name].iloc[[0]].values) # Static inputs are typically single values per entity
+            else:
+                logger_grn.debug(f"[{self.__class__.__name__}] Static input '{name}' ('static_input_loc') not found in df_normalized columns.")
+
 
         model_inputs = []
-        if known_regular_inputs:
-            model_inputs.append(np.stack(known_regular_inputs, axis=-1) if known_regular_inputs else np.array([]).reshape(len(df_normalized), 0))
-        if known_categorical_inputs:
-            model_inputs.append(np.stack(known_categorical_inputs, axis=-1) if known_categorical_inputs else np.array([]).reshape(len(df_normalized), 0))
-        if obs_inputs:
-            model_inputs.append(np.stack(obs_inputs, axis=-1) if obs_inputs else np.array([]).reshape(len(df_normalized), 0))
-        if static_inputs:
-            stacked_statics = np.stack([s.flatten() for s in static_inputs], axis=-1)
+        if known_regular_inputs_data:
+            # Stack along the last axis to create a (num_samples, num_timesteps_or_rows, num_features) array
+            stacked_known_regular = np.stack(known_regular_inputs_data, axis=-1)
+            model_inputs.append(stacked_known_regular)
+        if known_categorical_inputs_data:
+            stacked_known_categorical = np.stack(known_categorical_inputs_data, axis=-1)
+            model_inputs.append(stacked_known_categorical)
+        if obs_inputs_data:
+            stacked_obs = np.stack(obs_inputs_data, axis=-1)
+            model_inputs.append(stacked_obs)
+        if static_inputs_data:
+            # Static inputs are often 2D (batch_size, num_static_features)
+            # .iloc[[0]] and then stacking them might need careful handling depending on Keras model structure
+            # For now, assuming stacking along last axis is okay, or they are already correctly shaped.
+            stacked_statics = np.stack([s.flatten() for s in static_inputs_data], axis=-1)
             model_inputs.append(stacked_statics)
 
         if not model_inputs:
-            raise ValueError("No model inputs could be prepared based on config.")
+            logger_grn.error(f"[{self.__class__.__name__}] After attempting to process inputs, model_inputs list is still empty.")
+            logger_grn.error(f"Config values were: known_regular={config_known_regular}, known_categorical={config_known_categorical}, obs_loc={config_obs_loc}, static_loc={config_static_loc}")
+            logger_grn.error(f"Dataframe columns: {df_normalized.columns.tolist()}")
+            raise ValueError("No model inputs could be prepared based on config or fallback.")
 
         for i, arr in enumerate(model_inputs):
             if not isinstance(arr, np.ndarray):
