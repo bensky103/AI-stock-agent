@@ -31,4 +31,5 @@ gpush.sh
 pymain.sh
 gitpull.sh
 AI_prompt.txt
-saved_models/
+saved_models/predictions.csv
+saved_models
