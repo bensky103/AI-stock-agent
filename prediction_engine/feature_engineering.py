@@ -214,7 +214,38 @@ class FeatureEngineer:
         result['stoch_d'] = stoch.stoch_signal()
         
         # Trend strength indicators
-        result['adx_14'] = ADXIndicator(high=df[high_col].squeeze('columns'), low=df[low_col].squeeze('columns'), close=df[close_col].squeeze('columns')).adx()
+        adx_window = 14  # Default window for ADXIndicator, matching 'adx_14'
+        # Minimum data points needed for the first ADX value is typically 2*W-1
+        min_periods_adx = (2 * adx_window) - 1
+        
+        if len(df) >= min_periods_adx:
+            try:
+                adx_indicator = ADXIndicator(
+                    high=df[high_col].squeeze('columns'),
+                    low=df[low_col].squeeze('columns'),
+                    close=df[close_col].squeeze('columns'),
+                    window=adx_window,
+                    fillna=True # Use fillna=True for graceful handling of initial NaNs
+                )
+                result['adx_14'] = adx_indicator.adx()
+            except IndexError as ie: 
+                logger.warning(
+                    f"IndexError calculating ADX({adx_window}) with {len(df)} rows (expected min {min_periods_adx}): {ie}. "
+                    f"Filling 'adx_14' with NaNs."
+                )
+                result['adx_14'] = pd.Series(np.nan, index=df.index, name='adx_14')
+            except Exception as e: 
+                logger.error(
+                    f"Unexpected error calculating ADX({adx_window}) with {len(df)} rows: {e}. "
+                    f"Filling 'adx_14' with NaNs."
+                )
+                result['adx_14'] = pd.Series(np.nan, index=df.index, name='adx_14')
+        else:
+            logger.warning(
+                f"Insufficient data ({len(df)} rows) for ADX({adx_window}). "
+                f"Need at least {min_periods_adx}. Filling 'adx_14' with NaNs."
+            )
+            result['adx_14'] = pd.Series(np.nan, index=df.index, name='adx_14')
         
         # Market regime
         if self.detect_regime:
