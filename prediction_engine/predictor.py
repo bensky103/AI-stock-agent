@@ -177,7 +177,7 @@ class EnhancedStockPredictor:
                 # Using a recent period that should cover self.sequence_length
                 # The actual length of data needed will be sequence_length for feature prep.
                 fetch_end_date = datetime.now(pytz.utc)
-                fetch_start_date = fetch_end_date - timedelta(days=self.sequence_length * 3) # Fetch more to be safe, e.g. 3x sequence_length days
+                fetch_start_date = fetch_end_date - timedelta(days=60) # Fetch more to be safe, e.g. 60 days
                 
                 self.logger.info(f"[{self.__class__.__name__}] Fetching latest data for {symbol} from {fetch_start_date} to {fetch_end_date}")
                 latest_data_df = get_market_data(
