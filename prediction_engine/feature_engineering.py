@@ -147,50 +147,87 @@ class FeatureEngineer:
         """Calculate technical indicators."""
         # Convert column names to lowercase for consistency
         df = df.copy()
-        df.columns = df.columns.str.lower()
+        
+        # Safely convert column names to lowercase
+        if isinstance(df.columns, pd.MultiIndex):
+            # If we have a MultiIndex, we can't use str.lower() directly
+            # Instead, just use the dataframe as is
+            logger.warning("MultiIndex detected, skipping column name conversion")
+        else:
+            # For regular Index, convert column names to lowercase
+            df.columns = [col.lower() if isinstance(col, str) else col for col in df.columns]
         
         result = df.copy()
         
+        # Ensure required columns exist (handle both cases)
+        required_fields = ['open', 'high', 'low', 'close', 'volume']
+        upper_fields = ['Open', 'High', 'Low', 'Close', 'Volume']
+        
+        # Check available columns
+        has_lower = all(col in df.columns for col in required_fields)
+        has_upper = all(col in df.columns for col in upper_fields)
+        
+        # Choose appropriate column names
+        if has_lower:
+            field_map = {f: f for f in required_fields}
+        elif has_upper:
+            field_map = dict(zip(required_fields, upper_fields))
+        else:
+            raise ValueError(f"Missing required columns. Need {required_fields} or {upper_fields}")
+        
+        # Extract field names based on availability
+        open_col = field_map['open']
+        high_col = field_map['high']
+        low_col = field_map['low']
+        close_col = field_map['close']
+        volume_col = field_map['volume']
+        
         # Trend indicators
-        result['sma_20'] = SMAIndicator(close=df['close'], window=20).sma_indicator()
-        result['sma_50'] = SMAIndicator(close=df['close'], window=50).sma_indicator()
-        result['ema_20'] = EMAIndicator(close=df['close'], window=20).ema_indicator()
-        result['ema_50'] = EMAIndicator(close=df['close'], window=50).ema_indicator()
+        result['sma_20'] = SMAIndicator(close=df[close_col], window=20).sma_indicator()
+        result['sma_50'] = SMAIndicator(close=df[close_col], window=50).sma_indicator()
+        result['ema_20'] = EMAIndicator(close=df[close_col], window=20).ema_indicator()
+        result['ema_50'] = EMAIndicator(close=df[close_col], window=50).ema_indicator()
         
         # Momentum indicators
-        result['rsi_14'] = RSIIndicator(close=df['close']).rsi()
-        macd = MACD(close=df['close'])
+        result['rsi_14'] = RSIIndicator(close=df[close_col]).rsi()
+        macd = MACD(close=df[close_col])
         result['macd'] = macd.macd()
         result['macd_signal'] = macd.macd_signal()
         result['macd_hist'] = macd.macd_diff()
         
         # Volatility indicators
-        bb = BollingerBands(close=df['close'])
+        bb = BollingerBands(close=df[close_col])
         result['bb_upper'] = bb.bollinger_hband()
         result['bb_middle'] = bb.bollinger_mavg()
         result['bb_lower'] = bb.bollinger_lband()
         result['bb_width'] = (result['bb_upper'] - result['bb_lower']) / result['bb_middle']
-        result['atr_14'] = AverageTrueRange(high=df['high'], low=df['low'], close=df['close']).average_true_range()
+        result['atr_14'] = AverageTrueRange(high=df[high_col], low=df[low_col], close=df[close_col]).average_true_range()
         
         # Volume indicators
         result['vwap'] = VolumeWeightedAveragePrice(
-            high=df['high'], low=df['low'], close=df['close'], volume=df['volume']
+            high=df[high_col], low=df[low_col], close=df[close_col], volume=df[volume_col]
         ).volume_weighted_average_price()
         result['mfi_14'] = MFIIndicator(
-            high=df['high'], low=df['low'], close=df['close'], volume=df['volume']
+            high=df[high_col], low=df[low_col], close=df[close_col], volume=df[volume_col]
         ).money_flow_index()
         
         # Additional momentum indicators
-        stoch = StochasticOscillator(high=df['high'], low=df['low'], close=df['close'])
+        stoch = StochasticOscillator(high=df[high_col], low=df[low_col], close=df[close_col])
         result['stoch_k'] = stoch.stoch()
         result['stoch_d'] = stoch.stoch_signal()
         
         # Trend strength indicators
-        result['adx_14'] = ADXIndicator(high=df['high'], low=df['low'], close=df['close']).adx()
+        result['adx_14'] = ADXIndicator(high=df[high_col], low=df[low_col], close=df[close_col]).adx()
         
         # Market regime
         if self.detect_regime:
-            result['market_regime'] = self.market_regime_detector.detect_regime(df)
+            # Create a temporary DataFrame with standardized column names
+            regime_df = pd.DataFrame({
+                'close': df[close_col],
+                'high': df[high_col],
+                'low': df[low_col]
+            })
+            result['market_regime'] = self.market_regime_detector.detect_regime(regime_df)
         
         return result
     
@@ -414,13 +451,18 @@ class FeatureEngineer:
         
         Args:
             df: DataFrame containing market data with columns ['Open', 'High', 'Low', 'Close', 'Volume']
+                or ['open', 'high', 'low', 'close', 'volume']
             
         Returns:
             DataFrame with generated features
         """
-        # Convert column names to lowercase for consistency
+        # Make a copy to avoid modifying the original
         df = df.copy()
-        df.columns = df.columns.str.lower()
+        
+        # Safely convert column names - skip if MultiIndex
+        if not isinstance(df.columns, pd.MultiIndex):
+            # Convert column names to lowercase using a safe method
+            df.columns = [col.lower() if isinstance(col, str) else col for col in df.columns]
         
         # Calculate technical indicators
         features = self.calculate_technical_indicators(df)
