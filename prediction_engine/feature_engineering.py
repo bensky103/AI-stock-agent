@@ -167,6 +167,7 @@ class FeatureEngineer:
         self.feature_stds = None
         self.selected_features = None
         self.pca_components = None
+        self.target_scaler_params = None # To store params for 'close' column
         
         logger.info(
             f"Initialized feature engineer with {len(self.technical_indicators)} "
@@ -311,25 +312,85 @@ class FeatureEngineer:
         df: pd.DataFrame,
         fit: bool = False
     ) -> Tuple[pd.DataFrame, Optional[np.ndarray], Optional[np.ndarray]]:
-        """Normalize features using robust scaling."""
-        if not self.normalize:
-            return df, None, None
+        """Normalize features using RobustScaler.
         
-        # Select numeric columns
-        numeric_cols = df.select_dtypes(include=[np.number]).columns
+        If fit is True, scaler is fitted and target scaling parameters are stored.
+        """
+        # Ensure 'close' column exists if we intend to store its scaling params
+        if 'close' not in df.columns:
+            logger.warning("'close' column not found in DataFrame for normalize_features. Cannot store target scaling params.")
+            # Proceed with normalization if possible, but target denormalization will fail.
         
+        # Identify feature columns (all numeric columns except known non-feature like 'date', 'symbol')
+        # This logic should be robust to what df contains at this stage.
+        # Typically, df here would be post-indicator calculation.
+        feature_cols = df.select_dtypes(include=np.number).columns.tolist()
+        # Exclude known non-feature columns if they are somehow numeric and present
+        # This is a safeguard; ideally, df passed here is purely features + target.
+        potential_non_features = ['time_idx', 'group_id', 'identifier', 'date', 'symbol'] # Add any other known ID/time cols
+        feature_cols = [col for col in feature_cols if col.lower() not in potential_non_features]
+
+        if not feature_cols:
+            logger.warning("No feature columns identified for normalization.")
+            return df, None, None # Or self.feature_means, self.feature_stds if they were meant to be set
+
+        # Initialize means and stds if fitting
         if fit:
-            # Fit scaler
-            self.scaler.fit(df[numeric_cols])
-            self.feature_means = self.scaler.center_
-            self.feature_stds = self.scaler.scale_
+            self.feature_means = df[feature_cols].mean().values
+            self.feature_stds = df[feature_cols].std().values
         
-        # Transform data
-        normalized = df.copy()
-        normalized[numeric_cols] = self.scaler.transform(df[numeric_cols])
+        # Apply RobustScaler for normalization
+        if self.normalize and self.scaler is not None:
+            if fit:
+                logger.info(f"Fitting scaler on feature columns: {feature_cols}")
+                self.scaler.fit(df[feature_cols])
+                # Store scaling parameters for the 'close' column if present
+                if 'close' in feature_cols:
+                    try:
+                        close_idx = feature_cols.index('close')
+                        self.target_scaler_params = {
+                            'center': self.scaler.center_[close_idx],
+                            'scale': self.scaler.scale_[close_idx]
+                        }
+                        logger.info(f"Stored target scaler params for 'close': {self.target_scaler_params}")
+                    except (ValueError, IndexError, AttributeError) as e:
+                        logger.error(f"Could not get/store target scaler params for 'close': {e}. Scaler might not be fitted or 'close' not in features used for fit.")
+                        self.target_scaler_params = None # Ensure it's None if failed
+                else:
+                    logger.warning("'close' column not among feature_cols used for scaler fitting. Cannot store its specific scaling params.")
+                    self.target_scaler_params = None
+
+
+            # Check if scaler is fitted before transforming
+            if not self.is_scaler_fitted():
+                logger.error("Scaler is not fitted, cannot transform. Call with fit=True first or ensure scaler is pre-fitted.")
+                # Potentially return df unmodified or raise error
+                return df, self.feature_means, self.feature_stds
+
+
+            # Perform transformation
+            # Ensure columns exist before attempting to transform
+            cols_to_transform = [col for col in feature_cols if col in df.columns]
+            if not cols_to_transform:
+                logger.warning("No columns found in DataFrame to apply scaler transform.")
+            else:
+                df[cols_to_transform] = self.scaler.transform(df[cols_to_transform])
         
-        return normalized, self.feature_means, self.feature_stds
-    
+        return df, self.feature_means, self.feature_stds
+
+    def inverse_transform_target(self, scaled_target_value: float) -> float:
+        """Inverse transform a scaled target value (e.g., 'close' price)."""
+        if self.target_scaler_params is None:
+            logger.warning("Target scaler parameters not available. Cannot inverse transform target. Returning scaled value.")
+            return scaled_target_value
+        
+        center = self.target_scaler_params['center']
+        scale = self.target_scaler_params['scale']
+        
+        original_value = (scaled_target_value * scale) + center
+        logger.info(f"Inverse transformed target: scaled={scaled_target_value}, original={original_value}")
+        return original_value
+
     def select_features(
         self,
         X: np.ndarray,

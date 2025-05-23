@@ -306,19 +306,24 @@ class EnhancedStockPredictor:
                     
                     # Process predictions (example, adjust as per your model output)
                     # Assuming pred_output and uncertainty_output are tensors that need to be converted to numbers
-                    if hasattr(pred_output, 'cpu') and hasattr(pred_output, 'numpy'): # PyTorch tensor
-                        pred_value = pred_output.cpu().numpy().flatten()[0]
-                        uncertainty_value = uncertainty_output.cpu().numpy().flatten()[0] if uncertainty_output is not None else None
-                    elif hasattr(pred_output, 'numpy'): # TensorFlow tensor or other numpy-compatible
-                        pred_value = pred_output.numpy().flatten()[0]
-                        uncertainty_value = uncertainty_output.numpy().flatten()[0] if uncertainty_output is not None and hasattr(uncertainty_output, 'numpy') else None
-                    else: # Fallback if not a recognized tensor type
-                        pred_value = pred_output[0][0] if isinstance(pred_output, list) or isinstance(pred_output, tuple) else pred_output
-                        uncertainty_value = uncertainty_output[0][0] if isinstance(uncertainty_output, list) or isinstance(uncertainty_output, tuple) else uncertainty_output
+                    # TFTPredictor.__call__ now returns pred_value, uncertainty_value directly as floats (or np.nan)
+                    pred_value_scaled = pred_output # pred_output is the scaled prediction from TFTPredictor
+                    uncertainty_value = uncertainty_output # uncertainty_output is from TFTPredictor
 
-                    self.logger.info(f"[{self.__class__.__name__}] Prediction for {symbol}: {pred_value}, Uncertainty: {uncertainty_value}")    
+                    # Denormalize the prediction
+                    if pred_value_scaled is not np.nan and self.feature_engineer.target_scaler_params is not None:
+                        pred_value_denormalized = self.feature_engineer.inverse_transform_target(pred_value_scaled)
+                        self.logger.info(f"[{self.__class__.__name__}] Denormalized prediction for {symbol}: {pred_value_denormalized} (scaled: {pred_value_scaled})")
+                    elif pred_value_scaled is np.nan:
+                        pred_value_denormalized = np.nan
+                        self.logger.warning(f"[{self.__class__.__name__}] Scaled prediction is NaN for {symbol}. Cannot denormalize.")
+                    else: # target_scaler_params is None
+                        pred_value_denormalized = pred_value_scaled # Cannot denormalize, use scaled value with a warning
+                        self.logger.warning(f"[{self.__class__.__name__}] Target scaler params not available for {symbol}. Using scaled prediction: {pred_value_scaled}")
+
+                    self.logger.info(f"[{self.__class__.__name__}] Prediction for {symbol}: {pred_value_denormalized}, Uncertainty: {uncertainty_value}")    
                     predictions[symbol] = {
-                        "prediction": pred_value,
+                        "prediction": pred_value_denormalized,
                         "uncertainty": uncertainty_value,
                         "predicted_at": datetime.now(pytz.utc).isoformat()
                     }
