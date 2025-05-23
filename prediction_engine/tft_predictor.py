@@ -144,7 +144,7 @@ class TFTPredictor:
                     raise TFTPredictorError(f"Model weights not found in {self.model_path}")
                 
                 # Load the model weights
-                model.load(self.model_path, use_keras_loadings=True)
+                model.load(self.model_path)
                 
                 return model
                 
