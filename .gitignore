@@ -29,4 +29,5 @@ logs/market_feed.log
 logs/
 gpush.sh
 gpull.sh
+gitpull.sh
 AI_prompt.txt
