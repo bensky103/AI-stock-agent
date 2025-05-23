@@ -22,14 +22,8 @@ from .sequence_preprocessor import SequencePreprocessor
 
 # Configure logging
 logger = logging.getLogger(__name__)
-# Clear existing handlers to prevent duplicates
-if logger.hasHandlers():
-    logger.handlers.clear()
-logger.setLevel(logging.INFO)  # Change from WARNING to INFO
-_handler = logging.StreamHandler()
-_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-_handler.setFormatter(_formatter)
-logger.addHandler(_handler)
+# Don't configure handlers here, just get the logger
+logger.setLevel(logging.INFO)
 
 class MarketRegimeDetector:
     """Detect market regimes using technical indicators."""

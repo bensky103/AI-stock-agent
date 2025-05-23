@@ -19,18 +19,18 @@ import sys
 os.makedirs('logs', exist_ok=True)
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-    handlers=[
-        logging.FileHandler('logs/tft_predictor.log'),
-        logging.StreamHandler()
-    ]
-)
+# logging.basicConfig(
+#     level=logging.INFO,
+#     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+#     handlers=[
+#         logging.FileHandler('logs/tft_predictor.log'),
+#         logging.StreamHandler()
+#     ]
+# )
 logger = logging.getLogger(__name__)
 # Clear existing handlers to prevent duplicates if they're set by basicConfig
-if len(logger.handlers) > 1:
-    logger.handlers = [logger.handlers[0]]  # Keep only the first handler
+# if len(logger.handlers) > 1:
+#     logger.handlers = [logger.handlers[0]]  # Keep only the first handler
 
 class TFTPredictorError(Exception):
     """Exception class for TFT predictor errors."""
@@ -337,85 +337,114 @@ class TFTPredictor:
         Returns:
             Tuple of (predictions, uncertainty)
         """
-        # Use the class logger instead of creating a new one
         logger.info(f"TFTPredictor.__call__ with input shape: {sequence_tensor.shape}")
         
-        # Convert PyTorch tensor to numpy
         if hasattr(sequence_tensor, 'cpu'):
             sequence_np = sequence_tensor.cpu().numpy()
         else:
             sequence_np = sequence_tensor
             
         logger.info(f"Converted to numpy with shape: {sequence_np.shape}")
-        
-        # Handle the specific case where we have a 2D array with shape (sequence_length, 1)
-        # which matches the error "Data must be 1-dimensional, got ndarray of shape (42, 1) instead"
-        if len(sequence_np.shape) == 2 and sequence_np.shape[1] == 1:
-            logger.info(f"Reshaping 2D array with shape {sequence_np.shape} to 1D")
-            sequence_np = sequence_np.flatten()
-            # Now add batch and feature dimensions back
-            sequence_np = sequence_np.reshape(1, -1, 1)
-            logger.info(f"After reshape: {sequence_np.shape}")
-        # Check if input shape is 1D, which would need to be reshaped to 3D
-        elif len(sequence_np.shape) == 1:
-            logger.info(f"Reshaping 1D array with shape {sequence_np.shape} to 3D")
-            sequence_np = sequence_np.reshape(1, -1, 1)
-            logger.info(f"After reshape: {sequence_np.shape}")
-        # If tensor is already 3D, ensure first dimension is batch
-        elif len(sequence_np.shape) == 3:
-            logger.info(f"Using 3D tensor as is: {sequence_np.shape}")
+
+        # Initial reshaping based on input dimensions
+        if sequence_np.ndim == 1: # Input is 1D (e.g. [features])
+            # Assume batch_size=1, seq_len=1 if only features are provided
+            # Or if it's a sequence of features for one sample, seq_len=len, features=1
+            # This part is ambiguous without knowing the exact model input structure
+            # For now, let's assume it's (seq_len) and needs to become (1, seq_len, 1)
+            logger.info(f"Reshaping 1D array {sequence_np.shape} to 3D (1, seq_len, 1)")
+            sequence_np = sequence_np.reshape(1, -1, 1) 
+        elif sequence_np.ndim == 2: # Input is 2D
+            if sequence_np.shape[1] == 1 and sequence_np.shape[0] != 1: # (seq_len, 1)
+                logger.info(f"Input is 2D {sequence_np.shape}, potentially (seq_len, 1). Flattening and reshaping to (1, seq_len, 1).")
+                sequence_np = sequence_np.flatten().reshape(1, -1, 1)
+            elif sequence_np.shape[0] == 1: # (1, features_or_seq_len)
+                logger.info(f"Input is 2D {sequence_np.shape}, potentially (1, N). Reshaping to (1, N, 1) or (1, 1, N).")
+                # This case is also ambiguous. If N is seq_len, num_features=1. If N is num_features, seq_len=1.
+                # Assuming (1, seq_len) and num_features = 1
+                sequence_np = sequence_np.reshape(1, -1, 1)
+            else: # (seq_len, features)
+                logger.info(f"Input is 2D {sequence_np.shape}, assuming (seq_len, features). Adding batch dimension.")
+                sequence_np = sequence_np.reshape(1, sequence_np.shape[0], sequence_np.shape[1])
+        elif sequence_np.ndim == 3: # Input is 3D (batch, seq_len, features)
+            logger.info(f"Input is already 3D: {sequence_np.shape}")
         else:
-            logger.error(f"Unexpected tensor shape: {sequence_np.shape}")
-            raise ValueError(f"Expected tensor with shape compatible with [batch_size, seq_len, features], got {sequence_np.shape}")
+            raise ValueError(f"Unexpected tensor ndim: {sequence_np.ndim} for shape {sequence_np.shape}")
+
+        logger.info(f"Numpy array shape after initial processing: {sequence_np.shape}")
         
         batch_size, seq_len, n_features = sequence_np.shape
         
-        # Extract features - we need to create a proper dataframe for TFT
         try:
-            # Create a dummy dataframe for the TFT model
-            df = pd.DataFrame()
-            
-            # Add required columns
-            df['symbol'] = ['DUMMY'] * batch_size
-            df['datetime'] = [pd.Timestamp.now()] * batch_size
-            
-            # Use the last sequence value for the prediction features
-            if n_features > 0:
-                df['open'] = sequence_np[0, -1, 0]  # Use last timestep value
-                df['high'] = sequence_np[0, -1, 0] * 1.01  # Approximate
-                df['low'] = sequence_np[0, -1, 0] * 0.99  # Approximate
-                df['close'] = sequence_np[0, -1, 0]  # Use last timestep value
-            else:
-                # Fallback if we don't have features
-                df['open'] = 100.0  # Dummy value
-                df['high'] = 101.0
-                df['low'] = 99.0
-                df['close'] = 100.0
-            
-            df['volume'] = [1000] * batch_size  # Dummy value
-            
-            # Set index
+            df_data = []
+            for i in range(batch_size):
+                # For each item in the batch, construct the features for the DataFrame
+                # The original TFT model expects multiple features and known/unknown inputs.
+                # This part is a **significant simplification** and likely needs to match
+                # the exact preprocessing used during the model training.
+                
+                # We take the *last* time step of the sequence to form the input for prediction.
+                current_features = sequence_np[i, -1, :] # Shape: (n_features,)
+
+                # Ensure current_features is 1D for DataFrame construction if n_features is 1
+                if n_features == 1:
+                    current_features = current_features.flatten() # Should be (1,) -> scalar for single feature assignment
+                
+                # Construct a dictionary for the DataFrame row
+                # These column names MUST match what the TFT model was trained on.
+                # The error "Data must be 1-dimensional" often happens if a column here
+                # is expected as (N,) but is provided as (N,1).
+                row = {
+                    'symbol': f'DUMMY_{i}',
+                    'datetime': pd.Timestamp.now() - timedelta(days=batch_size - 1 - i),
+                    # Assuming the features in sequence_np correspond to these in order:
+                    # This is a placeholder. The actual mapping is crucial.
+                    'open': current_features[0] if n_features > 0 else 100.0,
+                    'high': current_features[0] * 1.01 if n_features > 0 else 101.0, # Approximation
+                    'low': current_features[0] * 0.99 if n_features > 0 else 99.0,   # Approximation
+                    'close': current_features[0] if n_features > 0 else 100.0,
+                    'volume': 1000 # Dummy volume
+                    # Add other known_future_inputs, static_inputs etc. as required by your model
+                    # For example, if 'day_of_week' was a feature:
+                    # 'day_of_week': (pd.Timestamp.now() - timedelta(days=batch_size - 1 - i)).dayofweek
+                }
+                # If more features are present in sequence_np, they need to be mapped to named columns
+                # Example: if n_features > 1, assign them to other expected columns
+                if n_features > 1:
+                     row['feature_1'] = current_features[1] # Ensure this column name is correct
+                # ... and so on for all features expected by the model
+
+                df_data.append(row)
+
+            if not df_data:
+                raise ValueError("Could not construct DataFrame, df_data is empty.")
+
+            df = pd.DataFrame(df_data)
             df.set_index(['symbol', 'datetime'], inplace=True)
             
-            # Make prediction
-            logger.info("Calling model.predict")
-            result = self.predict(df)
+            logger.info(f"Constructed DataFrame for prediction with shape: {df.shape}")
+            logger.debug(f"DataFrame head:\n{df.head()}")
+
+            # Call the original predict method which expects a DataFrame
+            logger.info("Calling self.predict(df) within __call__")
+            result = self.predict(df) # This calls the TFT model's predict
             
-            # Extract prediction
-            predictions = result['predictions'][0][0]  # Assuming first prediction
+            # Extract prediction - assuming it's for the first symbol and first forecast step
+            # The structure of 'result['predictions']' depends on your TFT model output
+            predictions_val = result['predictions'][0, 0] 
             
             # For now, we'll use a fixed uncertainty for simplicity
-            uncertainty = np.array([0.01])  # 1% uncertainty
+            uncertainty_val = 0.01  # 1% uncertainty, as a float
             
-            logger.info(f"Prediction: {predictions}, Uncertainty: {uncertainty}")
+            logger.info(f"Prediction: {predictions_val}, Uncertainty: {uncertainty_val}")
             
-            # Return in the format expected by the predictor
             import torch
-            predictions_tensor = torch.tensor([[predictions]], dtype=torch.float32)
-            uncertainty_tensor = torch.tensor([[uncertainty[0]]], dtype=torch.float32)
+            # Ensure tensors are 2D: [[value]]
+            predictions_tensor = torch.tensor([[predictions_val]], dtype=torch.float32)
+            uncertainty_tensor = torch.tensor([[uncertainty_val]], dtype=torch.float32)
             
             return predictions_tensor, uncertainty_tensor
             
         except Exception as e:
-            logger.error(f"Error in __call__: {str(e)}")
+            logger.error(f"Error in __call__ while creating DataFrame or predicting: {str(e)}", exc_info=True)
             raise TFTPredictorError(f"Failed to make prediction: {str(e)}") 

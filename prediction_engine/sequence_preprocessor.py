@@ -12,11 +12,8 @@ from datetime import datetime, timedelta
 
 # Configure logging
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.WARNING)
-_handler = logging.StreamHandler()
-_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-_handler.setFormatter(_formatter)
-logger.addHandler(_handler)
+# Don't configure handlers here, just get the logger
+logger.setLevel(logging.INFO)
 
 class SequencePreprocessor:
     """

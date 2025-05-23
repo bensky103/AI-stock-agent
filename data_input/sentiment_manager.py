@@ -20,11 +20,7 @@ import pytz
 
 # Configure logging
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.WARNING)
-_handler = logging.StreamHandler()
-_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-_handler.setFormatter(_formatter)
-logger.addHandler(_handler)
+logger.setLevel(logging.INFO)
 
 # Download required NLTK data
 try:

@@ -1,6 +1,9 @@
 # File: main.py
 
 import logging
+# Import our centralized logging configuration first
+import logging_config
+
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -12,16 +15,23 @@ from prediction_engine.sequence_preprocessor import SequencePreprocessor
 from prediction_engine.feature_engineering import FeatureEngineer
 from prediction_engine.predictor import EnhancedStockPredictor
 
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('logs/trading_system.log'),
-        logging.StreamHandler()
-    ]
-)
+# Remove the old logging setup since we now use centralized logging
+# logging.basicConfig(
+#     level=logging.INFO,
+#     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+#     handlers=[
+#         logging.FileHandler('logs/trading_system.log'),
+#         logging.StreamHandler()
+#     ]
+# )
 logger = logging.getLogger(__name__)
+
+# Ensure logs directory exists for file handler
+os.makedirs('logs', exist_ok=True)
+# Add file handler to the centralized logging
+file_handler = logging.FileHandler('logs/trading_system.log')
+file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+logging.getLogger().addHandler(file_handler)
 
 def load_config():
     """Load configuration from config file."""

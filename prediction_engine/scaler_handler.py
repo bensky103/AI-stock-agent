@@ -14,11 +14,7 @@ import joblib
 
 # Configure logging
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.WARNING)
-_handler = logging.StreamHandler()
-_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-_handler.setFormatter(_formatter)
-logger.addHandler(_handler)
+logger.setLevel(logging.INFO)
 
 class ScalerHandlerError(Exception):
     """Custom exception for scaler handler related errors."""
