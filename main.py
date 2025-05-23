@@ -1,5 +1,8 @@
 # File: main.py
 
+import os
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1' # Set before any other imports, especially TensorFlow-related
+
 import logging
 # Import our centralized logging configuration first
 import logging_config
@@ -7,7 +10,6 @@ import logging_config
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-import os
 import pytz
 
 from data_input.market_feed import MarketFeed
