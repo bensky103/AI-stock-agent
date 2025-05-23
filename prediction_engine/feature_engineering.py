@@ -212,37 +212,43 @@ class FeatureEngineer:
         close_col = field_map['close']
         volume_col = field_map['volume']
         
+        # Helper function to conditionally squeeze if DataFrame
+        def _squeeze_if_df(data):
+            if isinstance(data, pd.DataFrame):
+                return data.squeeze('columns')
+            return data
+
         # Trend indicators
-        result['sma_20'] = SMAIndicator(close=df[close_col].squeeze('columns'), window=20).sma_indicator()
-        result['sma_50'] = SMAIndicator(close=df[close_col].squeeze('columns'), window=50).sma_indicator()
-        result['ema_20'] = EMAIndicator(close=df[close_col].squeeze('columns'), window=20).ema_indicator()
-        result['ema_50'] = EMAIndicator(close=df[close_col].squeeze('columns'), window=50).ema_indicator()
+        result['sma_20'] = SMAIndicator(close=_squeeze_if_df(df[close_col]), window=20).sma_indicator()
+        result['sma_50'] = SMAIndicator(close=_squeeze_if_df(df[close_col]), window=50).sma_indicator()
+        result['ema_20'] = EMAIndicator(close=_squeeze_if_df(df[close_col]), window=20).ema_indicator()
+        result['ema_50'] = EMAIndicator(close=_squeeze_if_df(df[close_col]), window=50).ema_indicator()
         
         # Momentum indicators
-        result['rsi_14'] = RSIIndicator(close=df[close_col].squeeze('columns')).rsi()
-        macd = MACD(close=df[close_col].squeeze('columns'))
+        result['rsi_14'] = RSIIndicator(close=_squeeze_if_df(df[close_col])).rsi()
+        macd = MACD(close=_squeeze_if_df(df[close_col]))
         result['macd'] = macd.macd()
         result['macd_signal'] = macd.macd_signal()
         result['macd_hist'] = macd.macd_diff()
         
         # Volatility indicators
-        bb = BollingerBands(close=df[close_col].squeeze('columns'))
+        bb = BollingerBands(close=_squeeze_if_df(df[close_col]))
         result['bb_upper'] = bb.bollinger_hband()
         result['bb_middle'] = bb.bollinger_mavg()
         result['bb_lower'] = bb.bollinger_lband()
         result['bb_width'] = (result['bb_upper'] - result['bb_lower']) / result['bb_middle']
-        result['atr_14'] = AverageTrueRange(high=df[high_col].squeeze('columns'), low=df[low_col].squeeze('columns'), close=df[close_col].squeeze('columns')).average_true_range()
+        result['atr_14'] = AverageTrueRange(high=_squeeze_if_df(df[high_col]), low=_squeeze_if_df(df[low_col]), close=_squeeze_if_df(df[close_col])).average_true_range()
         
         # Volume indicators
         result['vwap'] = VolumeWeightedAveragePrice(
-            high=df[high_col].squeeze('columns'), low=df[low_col].squeeze('columns'), close=df[close_col].squeeze('columns'), volume=df[volume_col].squeeze('columns')
+            high=_squeeze_if_df(df[high_col]), low=_squeeze_if_df(df[low_col]), close=_squeeze_if_df(df[close_col]), volume=_squeeze_if_df(df[volume_col])
         ).volume_weighted_average_price()
         result['mfi_14'] = MFIIndicator(
-            high=df[high_col].squeeze('columns'), low=df[low_col].squeeze('columns'), close=df[close_col].squeeze('columns'), volume=df[volume_col].squeeze('columns')
+            high=_squeeze_if_df(df[high_col]), low=_squeeze_if_df(df[low_col]), close=_squeeze_if_df(df[close_col]), volume=_squeeze_if_df(df[volume_col])
         ).money_flow_index()
         
         # Additional momentum indicators
-        stoch = StochasticOscillator(high=df[high_col].squeeze('columns'), low=df[low_col].squeeze('columns'), close=df[close_col].squeeze('columns'))
+        stoch = StochasticOscillator(high=_squeeze_if_df(df[high_col]), low=_squeeze_if_df(df[low_col]), close=_squeeze_if_df(df[close_col]))
         result['stoch_k'] = stoch.stoch()
         result['stoch_d'] = stoch.stoch_signal()
         
@@ -254,9 +260,9 @@ class FeatureEngineer:
         if len(df) >= min_periods_adx:
             try:
                 adx_indicator = ADXIndicator(
-                    high=df[high_col].squeeze('columns'),
-                    low=df[low_col].squeeze('columns'),
-                    close=df[close_col].squeeze('columns'),
+                    high=_squeeze_if_df(df[high_col]),
+                    low=_squeeze_if_df(df[low_col]),
+                    close=_squeeze_if_df(df[close_col]),
                     window=adx_window,
                     fillna=True # Use fillna=True for graceful handling of initial NaNs
                 )
@@ -284,9 +290,9 @@ class FeatureEngineer:
         if self.detect_regime:
             # Create a temporary DataFrame with standardized column names
             regime_df = pd.DataFrame({
-                'close': df[close_col].squeeze('columns'),
-                'high': df[high_col].squeeze('columns'),
-                'low': df[low_col].squeeze('columns')
+                'close': _squeeze_if_df(df[close_col]),
+                'high': _squeeze_if_df(df[high_col]),
+                'low': _squeeze_if_df(df[low_col])
             })
             result['market_regime'] = self.market_regime_detector.detect_regime(regime_df)
         
