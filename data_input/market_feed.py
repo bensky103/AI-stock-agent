@@ -198,62 +198,106 @@ def get_market_data(
     # Load config if provided
     config = None
     if config_path:
-        config = load_config(config_path)
-    
-    data_frames = []
-    for symbol in symbols:
         try:
-            # Fetch data using yfinance
-            df = yf.download(
-                symbol,
-                start=start_date,
-                end=end_date,
-                interval=interval,
-                progress=False
-            )
-            
-            if df.empty:
-                raise MarketDataError(f"No data available for {symbol}")
-            
-            # Standardize column names
-            df = df.rename(columns={
-                'Adj Close': 'adj_close',
-                'Open': 'open',
-                'High': 'high',
-                'Low': 'low',
-                'Close': 'close',
-                'Volume': 'volume'
-            })
-            
-            # Reset index and rename Date to datetime
-            df = df.reset_index()
-            df = df.rename(columns={'Date': 'datetime'})
-            
-            # Add symbol column 
-            df['Symbol'] = symbol  # Using 'Symbol' with capital S to match expected format
-            
-            data_frames.append(df)
-            logger.info(f"Successfully fetched data for {symbol}")
-            
+            config = load_config(config_path)
+            # Potentially use config for yfinance parameters if needed in the future
+        except FileNotFoundError:
+            logger.warning(f"Config file {config_path} not found. Proceeding without it.")
+            config = None # Ensure config is None if file not found
+        except MarketDataError as e:
+            logger.warning(f"Error in config file {config_path}: {e}. Proceeding without it.")
+            config = None # Ensure config is None if config is invalid
+
+    all_data = []
+
+    if len(symbols) == 1:
+        symbol = symbols[0]
+        try:
+            logger.info(f"Fetching data for single symbol: {symbol}")
+            data = yf.download(symbol, start=start_date, end=end_date, interval=interval, progress=False, auto_adjust=False)
+            if data.empty:
+                logger.warning(f"No data found for symbol {symbol} from {start_date} to {end_date}.")
+            else:
+                data['Symbol'] = symbol
+                all_data.append(data)
         except Exception as e:
             logger.error(f"Error fetching data for {symbol}: {e}")
-            if isinstance(e, MarketDataError):
-                raise
-            raise MarketDataError(f"Error fetching data for {symbol}: {str(e)}")
+            # Optionally, raise or return an empty DataFrame or partial data
+            # For now, just log and continue if possible, or skip this symbol
+
+    else: # Multiple symbols
+        try:
+            logger.info(f"Fetching data for multiple symbols: {symbols}")
+            # yfinance download for multiple symbols typically returns a DataFrame with MultiIndex columns
+            # (e.g., ('Open', 'AAPL'), ('Close', 'AAPL'), ('Open', 'MSFT'), ...)
+            # when group_by='ticker' (which is the default if not specified or if version >= 0.2.10)
+            # Let's assume yf.download returns columns like ('Open', 'AAPL'), ('Close', 'MSFT') etc.
+            # or it might return a wide DataFrame which we then need to stack.
+            # For yfinance >= 0.2.10, group_by='ticker' is default, which is good.
+            # For yfinance < 0.2.10, it might be different, yf.download(tickers_list).stack(level=0).rename_axis(['Date', 'Ticker'])
+
+            # Standard yfinance behavior for multiple symbols (group_by='ticker' is default)
+            # results in columns being ('Price_type', 'Symbol'), e.g., ('Open', 'AAPL')
+            # The index is 'Date'.
+            multi_symbol_df = yf.download(symbols, start=start_date, end=end_date, interval=interval, progress=False, auto_adjust=False)
+
+            if not multi_symbol_df.empty:
+                # The columns are MultiIndex: (Field, Symbol), e.g. ('Adj Close', 'AAPL'), ('Close', 'AAPL'), ...
+                # We need to stack the 'Symbol' level from columns to the index.
+                # Before stacking, ensure the 'Date' (index) has a name, yfinance usually names it 'Date'
+                if multi_symbol_df.index.name is None:
+                    multi_symbol_df.index.name = 'Date' 
+                
+                # Stack the second level of column index (Symbols) to rows
+                # This will create a MultiIndex on rows: (Date, Symbol)
+                stacked_df = multi_symbol_df.stack(level=1).rename_axis(['Date', 'Symbol'])
+                # Now, we want (Symbol, Date) as index, so reorder and set_index if needed
+                # Or, it might be easier to reset_index and then set_index with desired order.
+                all_data.append(stacked_df.reset_index().set_index(['Symbol', 'Date']))
+            else:
+                logger.warning(f"No data found for symbols {symbols} from {start_date} to {end_date}.")
+
+        except Exception as e:
+            logger.error(f"Error fetching data for multiple symbols {symbols}: {e}")
+
+    if not all_data:
+        logger.warning("No data fetched for any symbols.")
+        return pd.DataFrame() # Return an empty DataFrame if no data
+
+    final_df = pd.concat(all_data)
+
+    # Ensure 'Date' is part of the index if it's a single symbol scenario
+    # For multiple symbols, stacking should have handled it, but reset_index().set_index() ensures final form
+    if 'Symbol' in final_df.columns and final_df.index.name == 'Date': # Common for single symbol
+        final_df.reset_index(inplace=True) # Make 'Date' a column
+        final_df.set_index(['Symbol', 'Date'], inplace=True)
+    elif not isinstance(final_df.index, pd.MultiIndex) or final_df.index.names != ['Symbol', 'Date']:
+        # If index is not already (Symbol, Date), attempt to fix it
+        if 'Symbol' in final_df.columns and 'Date' in final_df.columns:
+            try:
+                final_df.set_index(['Symbol', 'Date'], inplace=True)
+            except KeyError as e:
+                logger.error(f"Could not set ['Symbol', 'Date'] as index. Columns present: {final_df.columns}. Error: {e}")
+        elif 'Symbol' in final_df.columns and final_df.index.name == 'Date': # From single symbol path
+             final_df.reset_index(inplace=True)
+             final_df.set_index(['Symbol','Date'], inplace=True)
+        # Add more specific checks if necessary, this part can be tricky with yfinance versions
+
+    # Final check and sort index
+    if isinstance(final_df.index, pd.MultiIndex) and final_df.index.names == ['Symbol', 'Date']:
+        final_df.sort_index(inplace=True)
+    else:
+        logger.warning(f"Resulting DataFrame does not have the expected ['Symbol', 'Date'] MultiIndex. Index is: {final_df.index}")
+
+    # Validate and clean data
+    if config:
+        # Add technical indicators if config specifies them
+        if 'technical_indicators' in config.get('market_data', {}):
+            # This will need modification since we're not using MultiIndex anymore
+            # For now, let's skip adding technical indicators
+            pass
     
-    if not data_frames:
-        raise MarketDataError("No data available for any symbols")
-    
-    # Combine all data frames
-    result_df = pd.concat(data_frames, ignore_index=True)
-    
-    # Add technical indicators if config specifies them
-    if config and 'technical_indicators' in config.get('market_data', {}):
-        # This will need modification since we're not using MultiIndex anymore
-        # For now, let's skip adding technical indicators
-        pass
-    
-    return result_df
+    return final_df
 
 def add_technical_indicators(df: pd.DataFrame, config: Optional[Dict] = None) -> pd.DataFrame:
     """Add technical indicators to market data.
