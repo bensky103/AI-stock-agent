@@ -2,7 +2,7 @@
 
 #read -p "Enter commit message: " msg
 
-i++
+i += 1
 git add .
 git commit -m "fixing $i"
 git push origin main
