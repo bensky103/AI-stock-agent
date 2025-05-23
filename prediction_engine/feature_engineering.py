@@ -22,7 +22,7 @@ from .sequence_preprocessor import SequencePreprocessor
 
 # Configure logging
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.WARNING)
+logger.setLevel(logging.INFO)
 _handler = logging.StreamHandler()
 _formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 _handler.setFormatter(_formatter)
@@ -430,34 +430,44 @@ class FeatureEngineer:
         """
         # Ensure we have enough data
         if len(market_data) < self.sequence_length:
+            logger.error(f"Not enough data: {len(market_data)} rows, need {self.sequence_length}")
             raise ValueError(f"Need at least {self.sequence_length} time steps of market data")
+        
+        logger.info(f"Preparing features from market data with shape: {market_data.shape}")
         
         # Calculate technical indicators
         market_with_indicators = self.calculate_technical_indicators(market_data)
+        logger.info(f"Market data with indicators shape: {market_with_indicators.shape}")
         
         # Normalize market data
         market_normalized, _, _ = self.normalize_features(market_with_indicators)
+        logger.info(f"Normalized market data shape: {market_normalized.shape}")
         
         # Prepare sequences
         sequences = []
         for i in range(len(market_normalized) - self.sequence_length + 1):
             # Get data for this sequence window
             window_data = market_normalized.iloc[i:i + self.sequence_length]
+            logger.info(f"Window data shape for window {i}: {window_data.shape}")
             
             # Convert to NumPy array, ensuring we have a 2D shape (sequence_length, features)
             if isinstance(window_data, pd.DataFrame):
                 # For DataFrame, values gives us a 2D array of shape (seq_len, features)
                 sequence = window_data.values
+                logger.info(f"Sequence from DataFrame shape: {sequence.shape}")
             else:
                 # For Series, values might give 1D, so reshape if needed
                 sequence = window_data.values
+                logger.info(f"Sequence from Series initial shape: {sequence.shape}")
                 if sequence.ndim == 1:
                     sequence = sequence.reshape(-1, 1)  # Make it 2D
+                    logger.info(f"Reshaped sequence shape: {sequence.shape}")
             
             sequences.append(sequence)
         
         # Stack sequences and ensure correct shape for TFT model
         features = np.array(sequences)
+        logger.info(f"Stacked features shape: {features.shape}")
         
         # If we have a shape issue with dimensions, resolve it here
         # Check if we have a 2D array with shape (n, 1) - this is the problematic case
@@ -465,13 +475,16 @@ class FeatureEngineer:
         if features.ndim == 3 and features.shape[0] == 1:
             # Remove batch dimension for single sample
             features = features.squeeze(0)
+            logger.info(f"Squeezed features shape: {features.shape}")
         
         # Handle specific case where we have a 2D array with second dimension of 1
         # This is the specific error we're seeing
         if features.ndim == 2 and features.shape[1] == 1:
             # Convert to 1D array
             features = features.flatten()
+            logger.info(f"Flattened features shape: {features.shape}")
             
+        logger.info(f"Final features shape: {features.shape}")
         return features
 
     def generate_features(self, df: pd.DataFrame) -> pd.DataFrame:

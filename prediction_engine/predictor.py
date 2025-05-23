@@ -38,7 +38,7 @@ class StockPredictorError(Exception):
 
 # Configure logging
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.WARNING)  # Change back to WARNING from DEBUG
+logger.setLevel(logging.INFO)  # Change from WARNING to INFO for our debug logs
 _handler = logging.StreamHandler()
 _formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")  # Restore original format
 _handler.setFormatter(_formatter)
@@ -83,6 +83,7 @@ class EnhancedStockPredictor:
         
         # Set up logger for this class instance
         self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(logging.INFO)  # Set to INFO to see debug messages
         
         self.sequence_length = sequence_length
         self.prediction_horizon = prediction_horizon
@@ -202,17 +203,22 @@ class EnhancedStockPredictor:
                             self.logger.info(f"Loading model for {symbol} from {symbol_model_path}")
                             self.load_model(symbol_model_path)
                             self.models[symbol] = self.model
+                            self.logger.info(f"Successfully loaded model for {symbol}")
                         else:
                             # If no symbol-specific model, try the default model
                             self.logger.info(f"Loading default model for {symbol}")
                             self.load_model()  # This will use the default_model_dir
                             self.models[symbol] = self.model
+                            self.logger.info(f"Successfully loaded default model for {symbol}")
                     except Exception as model_err:
                         self.logger.error(f"Error loading model for {symbol}: {str(model_err)}")
                         # Continue with feature preparation to diagnose issues
                 
                 # Prepare features
+                self.logger.info(f"Preparing features for {symbol}")
                 features = self.feature_engineer.prepare_features(symbol_data)
+                self.logger.info(f"Features shape for {symbol}: {features.shape if features is not None else 'None'}")
+                
                 if features is None or len(features) < self.sequence_length:
                     self.logger.warning(f"Insufficient data for {symbol}")
                     predictions[symbol] = {'error': 'Insufficient data for prediction'}
@@ -220,40 +226,53 @@ class EnhancedStockPredictor:
                 
                 # Check if model was successfully loaded
                 if symbol in self.models and self.models[symbol] is not None:
+                    self.logger.info(f"Model for {symbol} is loaded, preparing for prediction")
+                    
                     # Get the last sequence for prediction
                     last_sequence = features[-self.sequence_length:]
                     
                     # Debug information
                     self.logger.info(f"Feature shape before model: {last_sequence.shape}")
+                    self.logger.info(f"Feature data type: {type(last_sequence)}")
+                    self.logger.info(f"Feature sample: {last_sequence[:5]} (showing first 5 elements)")
                     
                     # Ensure data has the right dimensionality for the model
                     # TFT models expect input of shape [batch_size, sequence_length, num_features]
                     if len(last_sequence.shape) == 1:
                         # If 1D, reshape to [1, sequence_length, 1]
+                        self.logger.info(f"Reshaping 1D array of shape {last_sequence.shape} to 3D")
                         last_sequence = last_sequence.reshape(1, -1, 1)
                     elif len(last_sequence.shape) == 2:
                         if last_sequence.shape[1] == 1:
                             # If shape is [sequence_length, 1], reshape to [1, sequence_length, 1]
+                            self.logger.info(f"Reshaping 2D array with second dimension 1 from {last_sequence.shape} to 3D")
                             last_sequence = last_sequence.reshape(1, -1, 1)
                         else:
                             # If shape is [sequence_length, features], add batch dimension
+                            self.logger.info(f"Adding batch dimension to 2D array of shape {last_sequence.shape}")
                             last_sequence = np.expand_dims(last_sequence, axis=0)
                     
                     # Convert to tensor and move to device
+                    self.logger.info(f"Converting to tensor of shape {last_sequence.shape}")
                     last_sequence = torch.FloatTensor(last_sequence).to(self.device)
                     self.logger.info(f"Tensor shape for model: {last_sequence.shape}")
                     
                     # Make prediction
                     try:
+                        self.logger.info(f"Calling model for {symbol}")
                         with torch.no_grad():
                             model = self.models[symbol]
+                            self.logger.info(f"Model type: {type(model).__name__}")
                             pred, uncertainty = model(last_sequence)
+                            self.logger.info(f"Prediction successful, shape: {pred.shape}")
                             pred = pred.cpu().numpy()[0][0]
                             uncertainty = uncertainty.cpu().numpy()[0][0] if uncertainty is not None else None
                     except Exception as model_error:
                         self.logger.error(f"Error during model prediction: {str(model_error)}")
+                        self.logger.error(f"Error type: {type(model_error).__name__}")
                         predictions[symbol] = {
                             'error': f"Model prediction error: {str(model_error)}",
+                            'error_type': type(model_error).__name__,
                             'feature_shape': str(features.shape),
                             'last_sequence_shape': str(last_sequence.shape)
                         }
