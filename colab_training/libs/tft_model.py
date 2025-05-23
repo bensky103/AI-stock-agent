@@ -777,8 +777,13 @@ class TFTModel:
         else:
             prepared_future_input = np.zeros((future_seq_len_keras, num_future_features_keras), dtype=np.float32)
         
-        logger_grn.info(f"Prepared Keras inputs shapes: Static={prepared_static_input.shape}, Historical={prepared_historical_input.shape}, Future={prepared_future_input.shape}")
-        return prepared_static_input, prepared_historical_input, prepared_future_input
+        # Ensure all inputs have a batch dimension of 1 for prediction
+        final_static_input = np.expand_dims(prepared_static_input, axis=0)
+        final_historical_input = np.expand_dims(prepared_historical_input, axis=0)
+        final_future_input = np.expand_dims(prepared_future_input, axis=0)
+
+        logger_grn.info(f"Prepared Keras inputs shapes (with batch dim): Static={final_static_input.shape}, Historical={final_historical_input.shape}, Future={final_future_input.shape}")
+        return final_static_input, final_historical_input, final_future_input
 
     def evaluate(self, test_df: pd.DataFrame) -> Dict:
         """Evaluate model performance on test data."""
