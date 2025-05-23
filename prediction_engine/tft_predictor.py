@@ -153,7 +153,7 @@ class TFTPredictor:
                     logger.error(f"Model weights .h5 file not found after checking paths: {checked_paths}")
                     raise TFTPredictorError(f"Model weights .h5 file not found. Checked: {checked_paths}")
                 
-                self.logger.info(f"Attempting to load weights from: {str(absolute_weights_path)}")
+                logger.info(f"Attempting to load weights from: {str(absolute_weights_path)}")
                 # Load the model weights
                 model.load_weights(str(absolute_weights_path))
                 
