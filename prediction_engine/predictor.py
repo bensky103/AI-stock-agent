@@ -202,6 +202,25 @@ class EnhancedStockPredictor:
                     predictions[symbol] = {"error": "Insufficient data for sequence"}
                     continue
 
+                # Check if scaler is fitted. If not, fit it using the historical data available for this symbol.
+                if not self.feature_engineer.is_scaler_fitted():
+                    self.logger.info(f"[{self.__class__.__name__}] Scaler not fitted for symbol {symbol} or globally. Fitting now.")
+                    # Use the full available `latest_data_df` to fit the scaler appropriately for this symbol context
+                    # This assumes `latest_data_df` is the historical data up to the point of prediction for the symbol.
+                    # 1. Calculate technical indicators on this data
+                    data_for_scaler_fitting_with_indicators = self.feature_engineer.calculate_technical_indicators(latest_data_df.copy()) # Use a copy
+                    # 2. Fit the scaler
+                    if not data_for_scaler_fitting_with_indicators.empty:
+                        self.logger.info(f"[{self.__class__.__name__}] Fitting scaler with data of shape {data_for_scaler_fitting_with_indicators.shape} for {symbol}.")
+                        _ = self.feature_engineer.normalize_features(data_for_scaler_fitting_with_indicators, fit=True)
+                        self.logger.info(f"[{self.__class__.__name__}] Scaler fitted for {symbol}.")
+                    else:
+                        self.logger.warning(f"[{self.__class__.__name__}] Data for scaler fitting is empty for {symbol} after adding indicators. Scaler not fitted.")
+                        predictions[symbol] = {"error": "Could not fit scaler due to empty data"}
+                        continue # Or handle as a more critical error
+                else:
+                    self.logger.info(f"[{self.__class__.__name__}] Scaler already fitted. Proceeding with feature preparation for {symbol}.")
+
                 # Prepare features for the latest data
                 # The feature engineer expects a DataFrame with a simple DatetimeIndex for a single symbol here.
                 self.logger.info(f"[{self.__class__.__name__}] Preparing features for {symbol} using latest_data_df with shape: {latest_data_df.shape}")

@@ -173,6 +173,14 @@ class FeatureEngineer:
             f"technical indicators"
         )
     
+    def is_scaler_fitted(self) -> bool:
+        """Check if the scaler has been fitted."""
+        if not self.normalize or self.scaler is None:
+            # If normalization is off or no scaler, it's effectively "fitted" or not needed.
+            return True
+        # RobustScaler sets 'center_' and 'scale_' attributes upon fitting.
+        return hasattr(self.scaler, 'center_') and self.scaler.center_ is not None
+    
     def calculate_technical_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """Calculate technical indicators."""
         # Convert column names to lowercase for consistency
