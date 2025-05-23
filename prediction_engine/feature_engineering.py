@@ -174,6 +174,16 @@ class FeatureEngineer:
             f"technical indicators"
         )
     
+    def _find_actual_column_name(self, columns_list: Union[pd.Index, List], generic_name: str) -> Optional[Union[str, tuple]]:
+        """Helper to find actual column name (str or tuple) matching generic_name (case-insensitive)."""
+        ln_generic_name = generic_name.lower()
+        for col_name in columns_list:
+            if isinstance(col_name, tuple) and col_name and str(col_name[0]).lower() == ln_generic_name:
+                return col_name
+            elif isinstance(col_name, str) and col_name.lower() == ln_generic_name:
+                return col_name
+        return None
+
     def is_scaler_fitted(self) -> bool:
         """Check if the scaler has been fitted."""
         if not self.normalize or self.scaler is None:
@@ -317,8 +327,10 @@ class FeatureEngineer:
         If fit is True, scaler is fitted and target scaling parameters are stored.
         """
         # Ensure 'close' column exists if we intend to store its scaling params
-        if 'close' not in df.columns:
-            logger.warning("'close' column not found in DataFrame for normalize_features. Cannot store target scaling params.")
+        actual_close_col_for_df = self._find_actual_column_name(df.columns, 'close')
+        
+        if not actual_close_col_for_df:
+            logger.warning(f"'close' column (or equivalent like ('Close', ...)) not found in DataFrame columns ({list(df.columns)}) for normalize_features. Cannot store target scaling params.")
             # Proceed with normalization if possible, but target denormalization will fail.
         
         # Identify feature columns (all numeric columns except known non-feature like 'date', 'symbol')
@@ -352,20 +364,24 @@ class FeatureEngineer:
             if fit:
                 logger.info(f"Fitting scaler on feature columns: {feature_cols}")
                 self.scaler.fit(df[feature_cols])
+                
                 # Store scaling parameters for the 'close' column if present
-                if 'close' in feature_cols:
+                actual_close_col_in_features = self._find_actual_column_name(feature_cols, 'close')
+                
+                if actual_close_col_in_features is not None:
                     try:
-                        close_idx = feature_cols.index('close')
+                        # feature_cols is a list here, get the index of the actual column name
+                        close_idx = feature_cols.index(actual_close_col_in_features)
                         self.target_scaler_params = {
                             'center': self.scaler.center_[close_idx],
                             'scale': self.scaler.scale_[close_idx]
                         }
-                        logger.info(f"Stored target scaler params for 'close': {self.target_scaler_params}")
+                        logger.info(f"Stored target scaler params for '{actual_close_col_in_features}': {self.target_scaler_params}")
                     except (ValueError, IndexError, AttributeError) as e:
-                        logger.error(f"Could not get/store target scaler params for 'close': {e}. Scaler might not be fitted or 'close' not in features used for fit.")
-                        self.target_scaler_params = None # Ensure it's None if failed
+                        logger.error(f"Could not get/store target scaler params for '{actual_close_col_in_features}': {e}. Scaler arrays might not align, or column not in list used for fit.")
+                        self.target_scaler_params = None 
                 else:
-                    logger.warning("'close' column not among feature_cols used for scaler fitting. Cannot store its specific scaling params.")
+                    logger.warning(f"'close' column (or equivalent) not found among feature_cols used for scaler fitting: {feature_cols}. Cannot store its specific scaling params.")
                     self.target_scaler_params = None
 
 
@@ -472,11 +488,20 @@ class FeatureEngineer:
             fit=fit
         )
         
-        # Prepare sequences
+        actual_target_col_name = self._find_actual_column_name(market_normalized.columns, 'close')
+
+        if actual_target_col_name is None:
+            logger.error(f"'close' column (or equivalent) not found in market_normalized columns ({list(market_normalized.columns)}) for sequence preparation. This is critical and will likely lead to errors.")
+            # Optionally, raise an error to stop mis-processing:
+            raise ValueError("Target 'close' column could not be identified in market_normalized data for sequence preparation.")
+
+        # Prepare sequences using the actual identified target column name
+        feature_column_names_for_sequence = [col for col in market_normalized.columns if col != actual_target_col_name]
+        
         sequences = self.sequence_preprocessor.prepare_sequence(
             market_normalized,
-            target_col='close',
-            feature_cols=[col for col in market_normalized.columns if col != 'close']
+            target_col=actual_target_col_name,
+            feature_cols=feature_column_names_for_sequence
         )
         
         X = sequences['features']
