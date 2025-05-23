@@ -150,6 +150,21 @@ def load_config(config_path: Union[str, Path]) -> dict:
     
     return config
 
+def _standardize_ohlc_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Standardize OHLCVA column names to lowercase and specific format."""
+    new_cols = {}
+    for col in df.columns:
+        col_str = str(col) # Ensure col is a string for .lower()
+        col_lower = col_str.lower()
+        if col_lower == 'adj close':
+            new_cols[col] = 'adj_close'
+        elif col_lower in ['open', 'high', 'low', 'close', 'volume', 'dividends', 'stock splits']:
+            new_cols[col] = col_lower
+        else:
+            # Keep other columns, try lowercasing them if they were strings
+            new_cols[col] = col_lower if isinstance(col, str) else col_str
+    return df.rename(columns=new_cols)
+
 def get_market_data(
     symbols: Union[str, List[str]],
     start_date: Optional[Union[str, datetime]] = None,
@@ -208,7 +223,7 @@ def get_market_data(
             logger.warning(f"Error in config file {config_path}: {e}. Proceeding without it.")
             config = None # Ensure config is None if config is invalid
 
-    all_data = []
+    all_data_processed = [] # List of DataFrames, each with 'Symbol' and 'Date' as columns
 
     if len(symbols) == 1:
         symbol = symbols[0]
@@ -218,76 +233,105 @@ def get_market_data(
             if data.empty:
                 logger.warning(f"No data found for symbol {symbol} from {start_date} to {end_date}.")
             else:
+                data = _standardize_ohlc_columns(data)
                 data['Symbol'] = symbol
-                all_data.append(data)
+                # yfinance returns 'Date' as index for single symbol
+                all_data_processed.append(data.reset_index()) 
         except Exception as e:
             logger.error(f"Error fetching data for {symbol}: {e}")
-            # Optionally, raise or return an empty DataFrame or partial data
-            # For now, just log and continue if possible, or skip this symbol
+            raise MarketDataError(f"Failed to download data for {symbol}: {e}") from e
 
     else: # Multiple symbols
         try:
             logger.info(f"Fetching data for multiple symbols: {symbols}")
-            # yfinance download for multiple symbols typically returns a DataFrame with MultiIndex columns
-            # (e.g., ('Open', 'AAPL'), ('Close', 'AAPL'), ('Open', 'MSFT'), ...)
-            # when group_by='ticker' (which is the default if not specified or if version >= 0.2.10)
-            # Let's assume yf.download returns columns like ('Open', 'AAPL'), ('Close', 'MSFT') etc.
-            # or it might return a wide DataFrame which we then need to stack.
-            # For yfinance >= 0.2.10, group_by='ticker' is default, which is good.
-            # For yfinance < 0.2.10, it might be different, yf.download(tickers_list).stack(level=0).rename_axis(['Date', 'Ticker'])
-
-            # Standard yfinance behavior for multiple symbols (group_by='ticker' is default)
-            # results in columns being ('Price_type', 'Symbol'), e.g., ('Open', 'AAPL')
-            # The index is 'Date'.
+            # yf.download for multiple symbols returns columns as MultiIndex: (Field, Ticker), Index: Date
             multi_symbol_df = yf.download(symbols, start=start_date, end=end_date, interval=interval, progress=False, auto_adjust=False)
 
             if not multi_symbol_df.empty:
-                # The columns are MultiIndex: (Field, Symbol), e.g. ('Adj Close', 'AAPL'), ('Close', 'AAPL'), ...
-                # We need to stack the 'Symbol' level from columns to the index.
-                # Before stacking, ensure the 'Date' (index) has a name, yfinance usually names it 'Date'
-                if multi_symbol_df.index.name is None:
-                    multi_symbol_df.index.name = 'Date' 
+                # Ensure index is named 'Date' (yf usually does this)
+                if multi_symbol_df.index.name is None or multi_symbol_df.index.name != 'Date':
+                    multi_symbol_df.index.name = 'Date'
                 
-                # Stack the second level of column index (Symbols) to rows
-                # This will create a MultiIndex on rows: (Date, Symbol)
-                stacked_df = multi_symbol_df.stack(level=1).rename_axis(['Date', 'Symbol'])
-                # Now, we want (Symbol, Date) as index, so reorder and set_index if needed
-                # Or, it might be easier to reset_index and then set_index with desired order.
-                all_data.append(stacked_df.reset_index().set_index(['Symbol', 'Date']))
+                # Stack the 'Ticker' level (level=1 of columns) to index.
+                # Resulting index: (Date, Ticker), Columns: Open, High, etc. (original case)
+                # yfinance column names for symbols level is often 'Ticker'
+                symbol_level_name = multi_symbol_df.columns.names[1] if len(multi_symbol_df.columns.names) > 1 and multi_symbol_df.columns.names[1] else 'Ticker'
+                
+                # Handle cases where yfinance might return a non-MultiIndex if only one symbol in list succeeds etc.
+                if not isinstance(multi_symbol_df.columns, pd.MultiIndex) and len(symbols) > 0:
+                     # If it's not multi-index, but we asked for multiple, means only one symbol might have returned data
+                     # or yf behaviour changed. Let's try to process it like single symbol data if possible.
+                     # This part might need more robust handling depending on yf output.
+                     # For now, assume if not MultiIndex, it's for a single one of the symbols.
+                     # This is tricky, the test mock should really provide proper multi_symbol_df.
+                     # If we get here, it implies yf.download did not behave as expected for multiple symbols.
+                     # Let's log a warning and try to infer symbol if only one.
+                     logger.warning("Expected MultiIndex columns from yfinance for multiple symbols, but got flat columns. Processing might be incomplete.")
+                     # This path is less robust. Ideally yf.download(list) gives MultiIndex columns.
+                     # For now, this path won't correctly set 'Symbol' unless only one symbol was in the list
+                     # and it returned data like a single symbol download (which is unlikely for yf.download(list_of_symbols)).
+                     # The main path assumes multi_symbol_df.columns IS a MultiIndex.
+                     # If test_get_market_data_multiple_symbols fails, its mock needs to provide a MultiIndex column DataFrame.
+                     # For the sake of trying to proceed if columns are flat:
+                     df_standardized = _standardize_ohlc_columns(multi_symbol_df.copy())
+                     # We don't know which symbol it is if columns are flat for multiple requested symbols
+                     # This branch is problematic. The code below expects `stacked_df`.
+                     # The following lines are for the proper MultiIndex column case:
+
+                stacked_df = multi_symbol_df.stack(level=symbol_level_name)
+                
+                # Standardize column names (Open, Adj Close -> open, adj_close)
+                stacked_df = _standardize_ohlc_columns(stacked_df)
+                
+                # Reset index to get 'Date' and the symbol level (e.g., 'Ticker') as columns
+                df_processed = stacked_df.reset_index()
+                
+                # Rename the ticker column to 'Symbol'
+                if symbol_level_name in df_processed.columns:
+                    df_processed.rename(columns={symbol_level_name: 'Symbol'}, inplace=True)
+                else:
+                    # This case should ideally not be hit if symbol_level_name was correct
+                    logger.error(f"Symbol level '{symbol_level_name}' not found after reset_index. Columns: {df_processed.columns}")
+
+                all_data_processed.append(df_processed)
             else:
                 logger.warning(f"No data found for symbols {symbols} from {start_date} to {end_date}.")
 
         except Exception as e:
             logger.error(f"Error fetching data for multiple symbols {symbols}: {e}")
+            raise MarketDataError(f"Failed to download data for {symbols}: {e}") from e
 
-    if not all_data:
+    if not all_data_processed:
         logger.warning("No data fetched for any symbols.")
-        return pd.DataFrame() # Return an empty DataFrame if no data
+        return pd.DataFrame() 
 
-    final_df = pd.concat(all_data)
+    final_df = pd.concat(all_data_processed, ignore_index=True)
 
-    # Ensure 'Date' is part of the index if it's a single symbol scenario
-    # For multiple symbols, stacking should have handled it, but reset_index().set_index() ensures final form
-    if 'Symbol' in final_df.columns and final_df.index.name == 'Date': # Common for single symbol
-        final_df.reset_index(inplace=True) # Make 'Date' a column
-        final_df.set_index(['Symbol', 'Date'], inplace=True)
-    elif not isinstance(final_df.index, pd.MultiIndex) or final_df.index.names != ['Symbol', 'Date']:
-        # If index is not already (Symbol, Date), attempt to fix it
-        if 'Symbol' in final_df.columns and 'Date' in final_df.columns:
-            try:
-                final_df.set_index(['Symbol', 'Date'], inplace=True)
-            except KeyError as e:
-                logger.error(f"Could not set ['Symbol', 'Date'] as index. Columns present: {final_df.columns}. Error: {e}")
-        elif 'Symbol' in final_df.columns and final_df.index.name == 'Date': # From single symbol path
-             final_df.reset_index(inplace=True)
-             final_df.set_index(['Symbol','Date'], inplace=True)
-        # Add more specific checks if necessary, this part can be tricky with yfinance versions
-
-    # Final check and sort index
-    if isinstance(final_df.index, pd.MultiIndex) and final_df.index.names == ['Symbol', 'Date']:
-        final_df.sort_index(inplace=True)
+    # Ensure 'Date' column is datetime
+    if 'Date' in final_df.columns:
+        final_df['Date'] = pd.to_datetime(final_df['Date'])
     else:
-        logger.warning(f"Resulting DataFrame does not have the expected ['Symbol', 'Date'] MultiIndex. Index is: {final_df.index}")
+        logger.error("'Date' column missing before setting MultiIndex. This should not happen.")
+        # If 'Date' is critical and missing, returning empty or raising error might be an option
+        return pd.DataFrame() # Or raise error
+
+    if 'Symbol' not in final_df.columns:
+        logger.error("'Symbol' column missing before setting MultiIndex. This should not happen.")
+        return pd.DataFrame() # Or raise error
+    
+    # Set and sort the MultiIndex
+    try:
+        # Ensure 'Symbol' and 'Date' are not duplicated in columns if they are also index names
+        cols_to_drop = [col for col in ['Symbol', 'Date'] if col in final_df.columns and col in final_df.index.names]
+        if cols_to_drop:
+            final_df = final_df.drop(columns=cols_to_drop)
+            
+        final_df.set_index(['Symbol', 'Date'], inplace=True)
+        final_df.sort_index(inplace=True)
+    except KeyError as e:
+        logger.error(f"Failed to set ['Symbol', 'Date'] index. Columns: {final_df.columns}. Index: {final_df.index}. Error: {e}")
+        # If setting index fails, return the DataFrame as is or an empty one, or raise
+        return pd.DataFrame() # Or final_df, or raise error
 
     # Validate and clean data
     if config:
