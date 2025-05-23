@@ -159,43 +159,71 @@ class TFTPredictor:
         Preprocess input data for the TFT model.
         
         Args:
-            df (pd.DataFrame): Input DataFrame with MultiIndex (symbol, datetime)
+            df (pd.DataFrame): Input DataFrame, indexed by group ID and time ID.
             
         Returns:
-            dict: Processed data ready for TFT model
+            dict: Processed data ready for the custom TFT model's predict method.
             
         Raises:
             TFTPredictorError: If data cannot be preprocessed
         """
         try:
+            # Get column names from hparams
+            # Ensure model and hparams are loaded; _load_model typically ensures self.model is set.
+            if self.model is None or not hasattr(self.model, 'hparams'):
+                 # Attempt to load the model if not already loaded to access hparams
+                logger.info("Model or hparams not available in preprocess_data, attempting to load model.")
+                self._load_model() # This should set self.model
+                if self.model is None or not hasattr(self.model, 'hparams'):
+                    raise TFTPredictorError("Failed to load model or model.hparams for preprocess_data.")
+
+            gid_col_name = self.model.hparams.get("group_ids", ["symbol"])[0]
+            tid_col_name = self.model.hparams.get("time_idx", "time_idx")
+            time_varying_unknown_reals = self.model.hparams.get("time_varying_unknown_reals", [])
+
             # Validate input data
-            if df.empty:
-                raise TFTPredictorError("Input DataFrame is empty")
+            if df.empty: # df is indexed here
+                raise TFTPredictorError("Input DataFrame is empty for preprocess_data")
             
-            required_columns = ['open', 'high', 'low', 'close', 'volume']
-            missing_columns = [col for col in required_columns if col not in df.columns]
-            if missing_columns:
-                raise TFTPredictorError(f"Missing required columns: {missing_columns}")
-            
-            # Check if we have enough data points
-            symbols = df.index.get_level_values('symbol').unique()
-            for symbol in symbols:
-                symbol_data = df.xs(symbol, level='symbol')
-                if len(symbol_data) < self.context_length:
-                    raise TFTPredictorError(
-                        f"Insufficient data for symbol {symbol}. "
-                        f"Need at least {self.context_length} data points, but got {len(symbol_data)}"
-                    )
-            
-            # Format data for TFT model
-            # This is a simplified version - in production, you would need to implement
-            # the full data formatting logic based on your TFT model's requirements
-            
-            # For now, we'll create a basic structure that matches what the model expects
+            # The df passed from __call__ is a single row for the last known point.
+            # The model itself will fetch historical context.
+            # The context_length check on this specific df is not appropriate here.
+
+            # Validate that all expected real-valued features are columns in df
+            # df.columns here are the feature names (and target names) as df is indexed
+            missing_reals = [col for col in time_varying_unknown_reals if col not in df.columns]
+            if missing_reals:
+                raise TFTPredictorError(
+                    f"Missing required time_varying_unknown_reals columns in the input DataFrame for preprocess_data: {missing_reals}. "
+                    f"Available columns: {df.columns.tolist()}. Expected from hparams: {time_varying_unknown_reals}. "
+                    "Check feature mapping in __call__ and ensure model hparams are correct."
+                )
+
+            # Add checks for other types of features if necessary (known reals, categoricals etc.)
+            # based on what self.model.hparams specifies and what the custom TFTModel wrapper expects.
+
+            df_flat = df.reset_index() # This makes gid_col_name and tid_col_name regular columns
+
+            # Ensure the time column is of a numerical type expected by the model (e.g., int64 for timestamps)
+            if tid_col_name in df_flat:
+                if not pd.api.types.is_numeric_dtype(df_flat[tid_col_name]):
+                    logger.warning(f"Time column '{tid_col_name}' is not numeric ({df_flat[tid_col_name].dtype}). Attempting conversion or ensure it's correctly formatted.")
+                    # Attempt conversion if obviously a timestamp-like float, otherwise error or pass through
+                    # This depends on what the custom TFTModel's predict method expects for its 'time' field
+                time_values = df_flat[tid_col_name].values
+                # Example: if timestamps are float but need to be int
+                # if pd.api.types.is_float_dtype(time_values):
+                #    time_values = time_values.astype(np.int64)
+            else:
+                raise TFTPredictorError(f"Time index column '{tid_col_name}' not found in flattened DataFrame.")
+
+            if gid_col_name not in df_flat:
+                raise TFTPredictorError(f"Group ID column '{gid_col_name}' not found in flattened DataFrame.")
+
             processed_data = {
-                "inputs": df.reset_index(),
-                "time": df.index.get_level_values('datetime').values,
-                "identifier": df.index.get_level_values('symbol').values
+                "inputs": df_flat, # This df_flat now contains gid, tid, and all feature/target columns.
+                "time": time_values, 
+                "identifier": df_flat[gid_col_name].values
             }
             
             return processed_data
@@ -453,9 +481,20 @@ class TFTPredictor:
                 raise ValueError("Could not construct DataFrame, df_data is empty.")
 
             df = pd.DataFrame(df_data)
-            df.set_index(['symbol', 'datetime'], inplace=True)
+            # df will have columns for group_id, time_idx, and all features/targets.
+            # These names are taken from hparams earlier in the loop.
+            gid_col_name_from_hparams = self.model.hparams.get("group_ids", ["symbol"])[0]
+            tid_col_name_from_hparams = self.model.hparams.get("time_idx", "time_idx")
             
-            logger.info(f"Constructed DataFrame for prediction with shape: {df.shape}")
+            # Ensure these columns exist before trying to set them as index
+            if gid_col_name_from_hparams not in df.columns:
+                raise TFTPredictorError(f"Group ID column '{gid_col_name_from_hparams}' (from hparams) not found in constructed DataFrame. Columns: {df.columns.tolist()}")
+            if tid_col_name_from_hparams not in df.columns:
+                raise TFTPredictorError(f"Time index column '{tid_col_name_from_hparams}' (from hparams) not found in constructed DataFrame. Columns: {df.columns.tolist()}")
+
+            df.set_index([gid_col_name_from_hparams, tid_col_name_from_hparams], inplace=True)
+            
+            logger.info(f"Constructed DataFrame for prediction with shape: {df.shape}, Index: {df.index.names}")
             logger.debug(f"DataFrame head:\n{df.head()}")
 
             # Call the original predict method which expects a DataFrame
