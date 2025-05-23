@@ -441,10 +441,30 @@ class FeatureEngineer:
         # Prepare sequences
         sequences = []
         for i in range(len(market_normalized) - self.sequence_length + 1):
-            sequence = market_normalized.iloc[i:i + self.sequence_length].values
+            # Get data for this sequence window
+            window_data = market_normalized.iloc[i:i + self.sequence_length]
+            
+            # Convert to NumPy array, ensuring we have a 2D shape (sequence_length, features)
+            if isinstance(window_data, pd.DataFrame):
+                # For DataFrame, values gives us a 2D array of shape (seq_len, features)
+                sequence = window_data.values
+            else:
+                # For Series, values might give 1D, so reshape if needed
+                sequence = window_data.values
+                if sequence.ndim == 1:
+                    sequence = sequence.reshape(-1, 1)  # Make it 2D
+            
             sequences.append(sequence)
         
-        return np.array(sequences)
+        # Stack sequences and ensure correct shape for TFT model
+        features = np.array(sequences)
+        
+        # If features has shape (1, seq_len, features), we need to reshape
+        # to ensure it's a batch of sequences
+        if features.shape[0] == 1 and features.ndim == 3:
+            return features.squeeze(0)  # Remove batch dimension if only one sample
+        
+        return features
 
     def generate_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Generate features from market data.

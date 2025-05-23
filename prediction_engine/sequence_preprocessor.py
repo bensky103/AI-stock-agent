@@ -104,6 +104,11 @@ class SequencePreprocessor:
             for i in range(len(df) - self.sequence_length - 2):
                 # Extract sequence
                 sequence = df[feature_cols].iloc[i:i + self.sequence_length].values
+                
+                # Ensure sequence is 2D with shape (sequence_length, n_features)
+                if len(sequence.shape) == 1:
+                    sequence = sequence.reshape(-1, 1)
+                    
                 sequences.append(sequence)
                 
                 # Store the last timestamp of this sequence
@@ -111,11 +116,24 @@ class SequencePreprocessor:
                 
                 # Extract target (next value after sequence)
                 target = df[target_col].iloc[i + self.sequence_length]
+                
+                # Ensure target is 1D (converting scalar to array if needed)
+                if np.isscalar(target):
+                    target = np.array([target])
+                elif len(target.shape) > 1:
+                    # If target is a 2D array, flatten it to 1D
+                    target = target.ravel()
+                    
                 targets.append(target)
             
             # Add the last sequence without a target (for prediction)
             # Take the sequence ending one step before the end date
             last_sequence = df[feature_cols].iloc[-(self.sequence_length + 1):-1].values
+            
+            # Ensure last_sequence is 2D
+            if len(last_sequence.shape) == 1:
+                last_sequence = last_sequence.reshape(-1, 1)
+                
             sequences.append(last_sequence)
             
             # Store the last timestamp of the final sequence
@@ -123,7 +141,21 @@ class SequencePreprocessor:
             
             # Convert to numpy arrays
             X = np.array(sequences)
-            y = np.array(targets)
+            
+            # If we have targets
+            if targets:
+                y = np.array(targets)
+                
+                # Ensure y is properly shaped
+                if len(y.shape) == 3 and y.shape[1] == 1:
+                    # If y has shape (n_samples, 1, n_features), squeeze out the middle dimension
+                    y = y.squeeze(axis=1)
+                elif len(y.shape) == 1:
+                    # If y is 1D, reshape to (n_samples, 1)
+                    y = y.reshape(-1, 1)
+            else:
+                # Create an empty array with correct shape if no targets
+                y = np.array([])
             
             logger.info(
                 f"Prepared {len(X)} sequences of length {self.sequence_length} "
