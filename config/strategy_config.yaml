@@ -53,7 +53,7 @@ sentiment:
 # Model Configuration
 model:
   type: 'tft'  # Changed from lstm to tft
-  sequence_length: 10  # Moved up one level for direct access
+  sequence_length: 30  # Moved up one level for direct access
   hidden_size: 64
   num_layers: 2
   dropout: 0.2
