@@ -27,6 +27,10 @@ def load_config():
     """Load configuration from config file."""
     import yaml
     
+    # Ensure necessary directories exist
+    os.makedirs('logs', exist_ok=True)
+    os.makedirs('saved_models', exist_ok=True)
+    
     try:
         with open('config/strategy_config.yaml', 'r') as f:
             config = yaml.safe_load(f)
@@ -116,7 +120,7 @@ def main():
         prediction_horizon = config['model']['prediction_horizon']
         
         predictor = EnhancedStockPredictor(
-            model_type='tft',  # Using TFT as it's the only supported model type
+            model_type='tft',  # Using TFT as the only supported model type
             sequence_length=sequence_length,
             prediction_horizon=prediction_horizon
         )
@@ -140,7 +144,12 @@ def main():
             end_date=end_date_str
         )
         
-        # Save predictions
+        # Save predictions with a default path if output config is missing
+        if 'output' not in config:
+            # Add the output section with default predictions path
+            config['output'] = {'predictions_path': 'saved_models/predictions.csv'}
+            logger.warning("Output configuration missing, using default path: saved_models/predictions.csv")
+        
         save_predictions(predictions, config['output']['predictions_path'])
         logger.info("Prediction process complete")
     

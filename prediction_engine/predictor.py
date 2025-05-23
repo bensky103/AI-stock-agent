@@ -81,6 +81,9 @@ class EnhancedStockPredictor:
         if model_type != 'tft':
             raise ValueError("Only 'tft' model type is supported")
         
+        # Set up logger for this class instance
+        self.logger = logging.getLogger(__name__)
+        
         self.sequence_length = sequence_length
         self.prediction_horizon = prediction_horizon
         self.device = device
@@ -196,22 +199,22 @@ class EnhancedStockPredictor:
                         # Try to load from symbol-specific path first
                         symbol_model_path = self.saved_models_dir / symbol
                         if symbol_model_path.exists():
-                            logger.info(f"Loading model for {symbol} from {symbol_model_path}")
+                            self.logger.info(f"Loading model for {symbol} from {symbol_model_path}")
                             self.load_model(symbol_model_path)
                             self.models[symbol] = self.model
                         else:
                             # If no symbol-specific model, try the default model
-                            logger.info(f"Loading default model for {symbol}")
+                            self.logger.info(f"Loading default model for {symbol}")
                             self.load_model()  # This will use the default_model_dir
                             self.models[symbol] = self.model
                     except Exception as model_err:
-                        logger.error(f"Error loading model for {symbol}: {str(model_err)}")
+                        self.logger.error(f"Error loading model for {symbol}: {str(model_err)}")
                         # Continue with feature preparation to diagnose issues
                 
                 # Prepare features
                 features = self.feature_engineer.prepare_features(symbol_data)
                 if features is None or len(features) < self.sequence_length:
-                    logger.warning(f"Insufficient data for {symbol}")
+                    self.logger.warning(f"Insufficient data for {symbol}")
                     predictions[symbol] = {'error': 'Insufficient data for prediction'}
                     continue
                 
@@ -229,34 +232,52 @@ class EnhancedStockPredictor:
                         uncertainty = uncertainty.cpu().numpy()[0][0] if uncertainty is not None else None
                     
                     # Store prediction
+                    # Handle both DataFrame with reset index and Series
+                    last_date = symbol_data['datetime'].iloc[-1] if 'datetime' in symbol_data.columns else symbol_data.index[-1]
+                    last_price = symbol_data['close'].iloc[-1] if 'close' in symbol_data.columns else (
+                                symbol_data['Close'].iloc[-1] if 'Close' in symbol_data.columns else None)
+                    
+                    # Format date string if it's a datetime object
+                    if hasattr(last_date, 'strftime'):
+                        last_date = last_date.strftime('%Y-%m-%d')
+                    else:
+                        last_date = str(last_date)
+                    
                     predictions[symbol] = {
                         'prediction': float(pred),
                         'uncertainty': float(uncertainty) if uncertainty is not None else None,
-                        'last_date': symbol_data.index[-1].strftime('%Y-%m-%d') if hasattr(symbol_data.index[-1], 'strftime') else str(symbol_data.index[-1]),
-                        'last_price': float(symbol_data['Close'].iloc[-1]) if 'Close' in symbol_data.columns else None,
+                        'last_date': last_date,
+                        'last_price': float(last_price) if last_price is not None else None,
                         'prediction_date': end_date
                     }
                     
-                    logger.info(f"Made prediction for {symbol}: {pred:.2f} ± {uncertainty:.2f if uncertainty else 'N/A'}")
+                    self.logger.info(f"Made prediction for {symbol}: {pred:.2f} ± {uncertainty:.2f if uncertainty else 'N/A'}")
                 else:
                     # No model available
+                    # Handle both DataFrame with reset index and Series
+                    last_date = symbol_data['datetime'].iloc[-1] if 'datetime' in symbol_data.columns else symbol_data.index[-1]
+                    last_price = symbol_data['close'].iloc[-1] if 'close' in symbol_data.columns else (
+                                symbol_data['Close'].iloc[-1] if 'Close' in symbol_data.columns else None)
+                    
+                    # Format date string if it's a datetime object
+                    if hasattr(last_date, 'strftime'):
+                        last_date = last_date.strftime('%Y-%m-%d')
+                    else:
+                        last_date = str(last_date)
+                        
                     predictions[symbol] = {
                         'prediction': None,
                         'uncertainty': None,
-                        'last_date': symbol_data.index[-1].strftime('%Y-%m-%d') if hasattr(symbol_data.index[-1], 'strftime') else str(symbol_data.index[-1]),
-                        'last_price': float(symbol_data['Close'].iloc[-1]) if 'Close' in symbol_data.columns else None,
+                        'last_date': last_date,
+                        'last_price': float(last_price) if last_price is not None else None,
                         'prediction_date': end_date,
                         'status': 'No model available - check pre-trained models in colab_training/tft_model',
                         'features_shape': str(features.shape) if features is not None else 'None'
                     }
-            
             except Exception as e:
-                logger.error(f"Error processing {symbol}: {str(e)}")
+                self.logger.error(f"Error processing {symbol}: {str(e)}")
                 predictions[symbol] = {
-                    'error': str(e),
-                    'last_date': None,
-                    'last_price': None,
-                    'prediction_date': end_date
+                    'error': str(e)
                 }
         
         return predictions

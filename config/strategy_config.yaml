@@ -230,6 +230,12 @@ position_management:
     AMZN: 1
     TSLA: 1
 
+# Output Configuration
+output:
+  predictions_path: saved_models/predictions.csv
+  reports_path: reports/
+  charts_path: charts/
+
 # Market Regime Detection
 market_regime:
   volatility_threshold: 0.2  # Threshold for high volatility regime
