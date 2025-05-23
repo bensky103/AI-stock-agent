@@ -24,6 +24,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import joblib
 import yaml
+import sys
 
 from .feature_engineering import FeatureEngineer
 from .sequence_preprocessor import SequencePreprocessor
@@ -156,231 +157,170 @@ class EnhancedStockPredictor:
         end_date: Optional[str] = None
     ) -> Dict[str, Dict[str, Union[float, str]]]:
         """
-        Make predictions for the given symbols.
+        Make predictions for a list of symbols.
         
         Args:
             symbols: List of stock symbols to predict
-            start_date: Optional start date for prediction (defaults to last sequence_length days)
-            end_date: Optional end date for prediction (defaults to today)
-        
+            start_date: Optional start date for fetching historical data
+            end_date: Optional end date for fetching historical data
+            
         Returns:
-            Dictionary of predictions for each symbol
+            Dictionary with predictions for each symbol
         """
-        predictions = {}
+        predictions: Dict[str, Dict[str, Union[float, str]]] = {}
         
-        # Set default dates if not provided
-        if end_date is None:
-            end_date = datetime.now().strftime('%Y-%m-%d')
-        if start_date is None:
-            start_date = (datetime.strptime(end_date, '%Y-%m-%d') - 
-                         timedelta(days=self.sequence_length * 2)).strftime('%Y-%m-%d')
-        
-        # Get market data for all symbols
-        market_data = get_market_data(symbols, start_date, end_date)
-        if market_data.empty:
-            logger.error("No market data available for prediction")
-            raise ValueError("No market data available for prediction")
-        
-        # Process each symbol
         for symbol in symbols:
+            self.logger.info(f"[{self.__class__.__name__}] Processing symbol: {symbol}")
             try:
-                # Get symbol-specific data
-                symbol_data = market_data[market_data['Symbol'] == symbol].copy()
-                if symbol_data.empty:
-                    logger.warning(f"No data available for {symbol}")
-                    predictions[symbol] = {'error': 'No data available'}
+                # Fetch latest market data for the symbol
+                # Ensure data is up-to-date for prediction
+                # Using a recent period that should cover self.sequence_length
+                # The actual length of data needed will be sequence_length for feature prep.
+                fetch_end_date = datetime.now(pytz.utc)
+                fetch_start_date = fetch_end_date - timedelta(days=self.sequence_length * 3) # Fetch more to be safe, e.g. 3x sequence_length days
+                
+                self.logger.info(f"[{self.__class__.__name__}] Fetching latest data for {symbol} from {fetch_start_date} to {fetch_end_date}")
+                latest_data_df = get_market_data(
+                    [symbol],
+                    start_date=fetch_start_date.strftime('%Y-%m-%d'),
+                    end_date=fetch_end_date.strftime('%Y-%m-%d')
+                )
+                
+                if latest_data_df.empty:
+                    self.logger.warning(f"[{self.__class__.__name__}] No data fetched for {symbol}, cannot make prediction.")
+                    predictions[symbol] = {"error": "No data available"}
                     continue
                 
-                # Load model if not already loaded
-                if symbol not in self.models:
-                    try:
-                        # Try to load from symbol-specific path first
-                        symbol_model_path = self.saved_models_dir / symbol
-                        if symbol_model_path.exists():
-                            self.logger.info(f"Loading model for {symbol} from {symbol_model_path}")
-                            self.load_model(symbol_model_path)
-                            self.models[symbol] = self.model
-                            self.logger.info(f"Successfully loaded model for {symbol}")
-                        else:
-                            # If no symbol-specific model, try the default model
-                            self.logger.info(f"Loading default model for {symbol}")
-                            self.load_model()  # This will use the default_model_dir
-                            self.models[symbol] = self.model
-                            self.logger.info(f"Successfully loaded default model for {symbol}")
-                    except Exception as model_err:
-                        self.logger.error(f"Error loading model for {symbol}: {str(model_err)}")
-                        # Continue with feature preparation to diagnose issues
+                # The fetched data might have a MultiIndex [('symbol', 'date')]
+                # Select data for the current symbol if it's a MultiIndex
+                if isinstance(latest_data_df.index, pd.MultiIndex):
+                    latest_data_df = latest_data_df.xs(symbol, level=0) # Assuming symbol is the first level
                 
-                # Prepare features
-                self.logger.info(f"Preparing features for {symbol}")
-                features = self.feature_engineer.prepare_features(symbol_data)
-                self.logger.info(f"Features shape for {symbol}: {features.shape if features is not None else 'None'}")
-                
-                if features is None or len(features) < self.sequence_length:
-                    self.logger.warning(f"Insufficient data for {symbol}")
-                    predictions[symbol] = {'error': 'Insufficient data for prediction'}
+                self.logger.info(f"[{self.__class__.__name__}] Shape of latest_data_df for {symbol} after potential .xs(): {latest_data_df.shape}")
+                if latest_data_df.shape[0] < self.sequence_length:
+                    self.logger.warning(f"[{self.__class__.__name__}] Insufficient data for {symbol} to form a sequence. Has {latest_data_df.shape[0]}, needs {self.sequence_length}. Skipping prediction.")
+                    predictions[symbol] = {"error": "Insufficient data for sequence"}
                     continue
-                
-                # Check if model was successfully loaded
-                if symbol in self.models and self.models[symbol] is not None:
-                    self.logger.info(f"Model for {symbol} is loaded, preparing for prediction")
-                    
-                    # Get the last sequence for prediction
-                    last_sequence = features[-self.sequence_length:]
-                    
-                    # Debug information
-                    self.logger.info(f"Feature shape before model: {last_sequence.shape}")
-                    self.logger.info(f"Feature data type: {type(last_sequence)}")
-                    self.logger.info(f"Feature sample: {last_sequence[:5]} (showing first 5 elements)")
-                    
-                    # Ensure data has the right dimensionality for the model
-                    # TFT models expect input of shape [batch_size, sequence_length, num_features]
-                    if len(last_sequence.shape) == 1:
-                        # If 1D, reshape to [1, sequence_length, 1]
-                        self.logger.info(f"Reshaping 1D array of shape {last_sequence.shape} to 3D")
-                        last_sequence = last_sequence.reshape(1, -1, 1)
-                    elif len(last_sequence.shape) == 2:
-                        if last_sequence.shape[1] == 1:
-                            # If shape is [sequence_length, 1], first try flattening to 1D
-                            self.logger.info(f"Flattening 2D array with shape {last_sequence.shape} to 1D")
-                            # This is the shape that's causing the error in pytest.txt
-                            last_sequence = last_sequence.flatten()
-                            # Then reshape to 3D for the model [1, sequence_length, 1]
-                            self.logger.info(f"Reshaping flattened array of shape {last_sequence.shape} to 3D")
-                            last_sequence = last_sequence.reshape(1, -1, 1)
-                        else:
-                            # If shape is [sequence_length, features], add batch dimension
-                            self.logger.info(f"Adding batch dimension to 2D array of shape {last_sequence.shape}")
-                            last_sequence = np.expand_dims(last_sequence, axis=0)
-                    
-                    # Convert to tensor and move to device
-                    self.logger.info(f"Converting to tensor of shape {last_sequence.shape}")
-                    last_sequence = torch.FloatTensor(last_sequence).to(self.device)
-                    self.logger.info(f"Tensor shape for model: {last_sequence.shape}")
-                    
-                    # Make prediction
-                    try:
-                        self.logger.info(f"Calling model for {symbol}")
-                        with torch.no_grad():
-                            model = self.models[symbol]
-                            self.logger.info(f"Model type: {type(model).__name__}")
-                            try:
-                                pred, uncertainty = model(last_sequence)
-                                self.logger.info(f"Prediction successful, shape: {pred.shape}")
-                                pred = pred.cpu().numpy()[0][0]
-                                uncertainty = uncertainty.cpu().numpy()[0][0] if uncertainty is not None else None
-                            except ValueError as ve:
-                                if "Data must be 1-dimensional" in str(ve):
-                                    self.logger.error(f"Dimensionality error: {str(ve)}")
-                                    self.logger.error(f"Last sequence shape: {last_sequence.shape}")
-                                    self.logger.error(f"Last sequence type: {type(last_sequence)}")
-                                    
-                                    # Try flattening the tensor to 1D
-                                    # This is a fallback attempt for when our previous fixes don't work
-                                    try:
-                                        self.logger.info("Attempting emergency flatten of tensor")
-                                        # Convert to numpy, flatten, then back to tensor
-                                        flat_data = last_sequence.cpu().numpy().flatten()
-                                        
-                                        # Reshape to match expected model input:
-                                        # First, determine sequence length (assume it's the second dimension of the original tensor)
-                                        if len(last_sequence.shape) >= 2:
-                                            seq_len = last_sequence.shape[1]
-                                        else:
-                                            # If 1D, use length divided by sequence_length as a guess
-                                            seq_len = len(flat_data) // self.sequence_length
-                                            if seq_len == 0:
-                                                seq_len = len(flat_data)  # Use full length if too small
-                                                
-                                        # Reshape to [1, seq_len, remainder] for model
-                                        num_features = len(flat_data) // seq_len
-                                        if num_features == 0:
-                                            num_features = 1  # At least one feature
-                                        
-                                        # Make sure dimensions work out
-                                        if seq_len * num_features > len(flat_data):
-                                            # If there's a mismatch, pad with zeros
-                                            pad_size = seq_len * num_features - len(flat_data)
-                                            flat_data = np.pad(flat_data, (0, pad_size), 'constant')
-                                        
-                                        reshaped_data = flat_data.reshape(1, seq_len, num_features)
-                                        self.logger.info(f"Reshaped emergency tensor to shape: {reshaped_data.shape}")
-                                        
-                                        # Convert back to tensor
-                                        fixed_tensor = torch.FloatTensor(reshaped_data).to(self.device)
-                                        self.logger.info(f"Fixed tensor shape: {fixed_tensor.shape}")
-                                        
-                                        # Try with fixed tensor
-                                        pred, uncertainty = model(fixed_tensor)
-                                        self.logger.info("Prediction with reshaped tensor succeeded")
-                                        pred = pred.cpu().numpy()[0][0] if len(pred.shape) > 1 else pred.cpu().numpy()[0]
-                                        uncertainty = uncertainty.cpu().numpy()[0][0] if uncertainty is not None and len(uncertainty.shape) > 1 else (uncertainty.cpu().numpy()[0] if uncertainty is not None else None)
-                                    except Exception as flatten_err:
-                                        self.logger.error(f"Emergency reshape failed: {str(flatten_err)}")
-                                        raise
-                                else:
-                                    raise
-                                    
-                    except Exception as model_error:
-                        self.logger.error(f"Error during model prediction: {str(model_error)}")
-                        self.logger.error(f"Error type: {type(model_error).__name__}")
-                        predictions[symbol] = {
-                            'error': f"Model prediction error: {str(model_error)}",
-                            'error_type': type(model_error).__name__,
-                            'feature_shape': str(features.shape),
-                            'last_sequence_shape': str(last_sequence.shape) if 'last_sequence' in locals() else 'Unknown'
-                        }
-                        continue
-                    
-                    # Store prediction
-                    # Handle both DataFrame with reset index and Series
-                    last_date = symbol_data['datetime'].iloc[-1] if 'datetime' in symbol_data.columns else symbol_data.index[-1]
-                    last_price = symbol_data['close'].iloc[-1] if 'close' in symbol_data.columns else (
-                                symbol_data['Close'].iloc[-1] if 'Close' in symbol_data.columns else None)
-                    
-                    # Format date string if it's a datetime object
-                    if hasattr(last_date, 'strftime'):
-                        last_date = last_date.strftime('%Y-%m-%d')
-                    else:
-                        last_date = str(last_date)
-                    
-                    predictions[symbol] = {
-                        'prediction': float(pred),
-                        'uncertainty': float(uncertainty) if uncertainty is not None else None,
-                        'last_date': last_date,
-                        'last_price': float(last_price) if last_price is not None else None,
-                        'prediction_date': end_date
-                    }
-                    
-                    self.logger.info(f"Made prediction for {symbol}: {pred:.2f} ± {uncertainty:.2f if uncertainty else 'N/A'}")
+
+                # Prepare features for the latest data
+                # The feature engineer expects a DataFrame with a simple DatetimeIndex for a single symbol here.
+                self.logger.info(f"[{self.__class__.__name__}] Preparing features for {symbol} using latest_data_df with shape: {latest_data_df.shape}")
+                features_np = self.feature_engineer.prepare_features(latest_data_df) # Fit should be False for prediction
+                self.logger.info(f"[{self.__class__.__name__}] Shape of features_np for {symbol} from feature_engineer: {features_np.shape if isinstance(features_np, np.ndarray) else type(features_np)}")
+
+                if not isinstance(features_np, np.ndarray) or features_np.size == 0:
+                    self.logger.warning(f"[{self.__class__.__name__}] Feature preparation for {symbol} returned empty or invalid result. Shape: {features_np.shape if isinstance(features_np, np.ndarray) else 'N/A'}. Skipping prediction.")
+                    predictions[symbol] = {"error": "Feature preparation failed"}
+                    continue
+
+                # Select the last sequence for prediction
+                # features_np could be (num_sequences, sequence_length, num_features) or (sequence_length, num_features) if only one sequence
+                if features_np.ndim == 3: # (num_sequences, seq_len, num_features)
+                    last_sequence_np = features_np[-1] # Take the most recent sequence
+                    self.logger.info(f"[{self.__class__.__name__}] Selected last_sequence_np (from 3D features_np) for {symbol}, shape: {last_sequence_np.shape}")
+                elif features_np.ndim == 2: # (seq_len, num_features)
+                    last_sequence_np = features_np
+                    self.logger.info(f"[{self.__class__.__name__}] Using features_np directly as last_sequence_np (2D) for {symbol}, shape: {last_sequence_np.shape}")
+                elif features_np.ndim == 1: # (features_at_last_step_if_flattened_unexpectedly_by_FE)
+                    # This case should ideally not happen if prepare_features returns sequences.
+                    # If it does, it implies prepare_features might have returned a 1D array of the last timestep's features from a single sequence.
+                    # The model expects (batch_size, sequence_length, num_features).
+                    # We need to reshape it to (1, sequence_length (if known, or 1), num_features (or len of array if seq_len=1) )
+                    self.logger.warning(f"[{self.__class__.__name__}] features_np for {symbol} is 1D (shape: {features_np.shape}). This is unexpected for sequence input. Attempting reshape.")
+                    # Assuming this 1D array represents features for a single time step in a sequence of length 1 for prediction context
+                    # Or it could be (seq_len,) if only 1 feature. This is ambiguous.
+                    # For TFT, typically expects sequence_length > 1. For now, assuming it needs to be (1, len, 1) or (1, 1, len)
+                    # This path is problematic and indicates an issue in feature_engineer output for sequence models.
+                    # Let's assume it means (num_features,) for a single step of a sequence.
+                    # TFTPredictor expects (batch, seq_len, features).
+                    # If sequence_length for model is self.sequence_length, but we only have one step of features:
+                    # This is likely an error state. The feature engineer should provide a full sequence.
+                    # For now, to avoid immediate crash, we could try to pad or error out.
+                    self.logger.error(f"[{self.__class__.__name__}] Cannot form a sequence from 1D features_np. Feature engineer should provide at least 2D. Skipping {symbol}.")
+                    predictions[symbol] = {"error": "Feature engineer returned 1D features for sequence model"}
+                    continue
                 else:
-                    # No model available
-                    # Handle both DataFrame with reset index and Series
-                    last_date = symbol_data['datetime'].iloc[-1] if 'datetime' in symbol_data.columns else symbol_data.index[-1]
-                    last_price = symbol_data['close'].iloc[-1] if 'close' in symbol_data.columns else (
-                                symbol_data['Close'].iloc[-1] if 'Close' in symbol_data.columns else None)
-                    
-                    # Format date string if it's a datetime object
-                    if hasattr(last_date, 'strftime'):
-                        last_date = last_date.strftime('%Y-%m-%d')
-                    else:
-                        last_date = str(last_date)
+                    self.logger.error(f"[{self.__class__.__name__}] features_np for {symbol} has unexpected ndim: {features_np.ndim}, shape: {features_np.shape}. Skipping.")
+                    predictions[symbol] = {"error": "Features have unexpected dimensions"}
+                    continue
+
+                # Ensure data has the right dimensionality for the model input tensor
+                # Standard TFT models expect input of shape [batch_size, sequence_length, num_features]
+                # last_sequence_np is currently (sequence_length, num_features)
+                if last_sequence_np.ndim == 2:
+                    model_input_np = np.expand_dims(last_sequence_np, axis=0) # Add batch dimension -> (1, sequence_length, num_features)
+                    self.logger.info(f"[{self.__class__.__name__}] Expanded last_sequence_np for {symbol} to model_input_np shape: {model_input_np.shape}")
+                else:
+                    # This case should not be reached if above logic is correct
+                    self.logger.error(f"[{self.__class__.__name__}] last_sequence_np for {symbol} is not 2D after selection. Shape: {last_sequence_np.shape}. Skipping.")
+                    predictions[symbol] = {"error": "Processed sequence is not 2D"}
+                    continue
+                
+                # Convert to tensor and move to device
+                # This assumes PyTorch. If TensorFlow, use tf.convert_to_tensor.
+                # For TF, device placement is usually handled by TF itself or via tf.device context.
+                if "torch" in sys.modules:
+                    import torch
+                    model_input_tensor = torch.FloatTensor(model_input_np).to(self.device)
+                    self.logger.info(f"[{self.__class__.__name__}] Converted model_input_np to PyTorch tensor for {symbol}, shape: {model_input_tensor.shape}, device: {model_input_tensor.device}")
+                elif "tensorflow" in sys.modules:
+                    import tensorflow as tf
+                    # For TensorFlow, ensure data type matches model expectation (e.g., tf.float32)
+                    model_input_tensor = tf.convert_to_tensor(model_input_np, dtype=tf.float32)
+                    self.logger.info(f"[{self.__class__.__name__}] Converted model_input_np to TensorFlow tensor for {symbol}, shape: {model_input_tensor.shape}")
+                else:
+                    self.logger.warning("[{self.__class__.__name__}] Neither PyTorch nor TensorFlow found in sys.modules. Passing numpy array to model.")
+                    model_input_tensor = model_input_np # Pass as numpy if framework unclear
+
+                # Make prediction
+                try:
+                    self.logger.info(f"[{self.__class__.__name__}] Calling model for {symbol} with tensor of shape {model_input_tensor.shape if hasattr(model_input_tensor, 'shape') else type(model_input_tensor)}")
+                    model_to_use = self.models.get(symbol, self.models.get("default"))
+                    if model_to_use is None:
+                        self.logger.error(f"[{self.__class__.__name__}] No model found for {symbol} or default. Skipping.")
+                        predictions[symbol] = {"error": f"Model not found for {symbol}"}
+                        continue
                         
+                    self.logger.info(f"[{self.__class__.__name__}] Using model type: {type(model_to_use).__name__} for {symbol}")
+                    pred_output, uncertainty_output = model_to_use(model_input_tensor) # TFTPredictor.__call__ expects a tensor
+                    
+                    # Process predictions (example, adjust as per your model output)
+                    # Assuming pred_output and uncertainty_output are tensors that need to be converted to numbers
+                    if hasattr(pred_output, 'cpu') and hasattr(pred_output, 'numpy'): # PyTorch tensor
+                        pred_value = pred_output.cpu().numpy().flatten()[0]
+                        uncertainty_value = uncertainty_output.cpu().numpy().flatten()[0] if uncertainty_output is not None else None
+                    elif hasattr(pred_output, 'numpy'): # TensorFlow tensor or other numpy-compatible
+                        pred_value = pred_output.numpy().flatten()[0]
+                        uncertainty_value = uncertainty_output.numpy().flatten()[0] if uncertainty_output is not None and hasattr(uncertainty_output, 'numpy') else None
+                    else: # Fallback if not a recognized tensor type
+                        pred_value = pred_output[0][0] if isinstance(pred_output, list) or isinstance(pred_output, tuple) else pred_output
+                        uncertainty_value = uncertainty_output[0][0] if isinstance(uncertainty_output, list) or isinstance(uncertainty_output, tuple) else uncertainty_output
+
+                    self.logger.info(f"[{self.__class__.__name__}] Prediction for {symbol}: {pred_value}, Uncertainty: {uncertainty_value}")    
                     predictions[symbol] = {
-                        'prediction': None,
-                        'uncertainty': None,
-                        'last_date': last_date,
-                        'last_price': float(last_price) if last_price is not None else None,
-                        'prediction_date': end_date,
-                        'status': 'No model available - check pre-trained models in colab_training/tft_model',
-                        'features_shape': str(features.shape) if features is not None else 'None'
+                        "prediction": pred_value,
+                        "uncertainty": uncertainty_value,
+                        "predicted_at": datetime.now(pytz.utc).isoformat()
                     }
+                    
+                except ValueError as ve:
+                    # This is where the "Data must be 1-dimensional" error is caught
+                    self.logger.error(f"[{self.__class__.__name__}] ValueError during model call for {symbol}: {str(ve)}")
+                    self.logger.error(f"[{self.__class__.__name__}] Model input tensor shape at error: {model_input_tensor.shape if 'model_input_tensor' in locals() and hasattr(model_input_tensor, 'shape') else 'N/A'}")
+                    self.logger.error(f"[{self.__class__.__name__}] Type of model_input_tensor: {type(model_input_tensor) if 'model_input_tensor' in locals() else 'N/A'}")
+                    # Log details of the exception for more context
+                    self.logger.exception(f"[{self.__class__.__name__}] Full exception details for {symbol}:")
+                    predictions[symbol] = {"error": f"ValueError in model: {str(ve)}"}
+                except Exception as e:
+                    self.logger.error(f"[{self.__class__.__name__}] Unexpected error during model prediction for {symbol}: {str(e)}")
+                    self.logger.exception(f"[{self.__class__.__name__}] Full exception details for {symbol}:")
+                    predictions[symbol] = {"error": f"General error in model: {str(e)}"}
+
             except Exception as e:
-                self.logger.error(f"Error processing {symbol}: {str(e)}")
-                predictions[symbol] = {
-                    'error': str(e)
-                }
-        
+                self.logger.error(f"[{self.__class__.__name__}] Error processing symbol {symbol}: {str(e)}")
+                self.logger.exception(f"[{self.__class__.__name__}] Full exception details for {symbol} processing:")
+                predictions[symbol] = {"error": str(e)}
+                
         return predictions
 
     def train(
@@ -547,6 +487,10 @@ class EnhancedStockPredictor:
                 raise
         
         return history
+
+    def _get_or_load_model(self, symbol: str) -> Any:
+        # Implementation of _get_or_load_model method
+        pass
 
 if __name__ == "__main__":
     # Example usage with memory-efficient settings

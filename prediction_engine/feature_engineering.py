@@ -430,63 +430,81 @@ class FeatureEngineer:
             logger.error(f"Not enough data: {len(market_data)} rows, need {self.sequence_length}")
             raise ValueError(f"Need at least {self.sequence_length} time steps of market data")
         
-        logger.info(f"Preparing features from market data with shape: {market_data.shape}")
+        logger.info(f"[{self.__class__.__name__}] Preparing features from input market_data with shape: {market_data.shape}")
         
         # Calculate technical indicators
         market_with_indicators = self.calculate_technical_indicators(market_data)
-        logger.info(f"Market data with indicators shape: {market_with_indicators.shape}")
+        logger.info(f"[{self.__class__.__name__}] Market data with indicators shape: {market_with_indicators.shape}")
         
         # Normalize market data
         market_normalized, _, _ = self.normalize_features(market_with_indicators)
-        logger.info(f"Normalized market data shape: {market_normalized.shape}")
-        
+        logger.info(f"[{self.__class__.__name__}] Normalized market_normalized data shape: {market_normalized.shape}")
+        if market_normalized.empty:
+            logger.error(f"[{self.__class__.__name__}] market_normalized is empty after normalization.")
+            # Potentially raise an error or return an empty array, depending on desired handling
+            raise ValueError("market_normalized is empty after normalization, cannot prepare features.")
+
         # Prepare sequences
         sequences = []
-        for i in range(len(market_normalized) - self.sequence_length + 1):
-            # Get data for this sequence window
-            window_data = market_normalized.iloc[i:i + self.sequence_length]
-            logger.info(f"Window data shape for window {i}: {window_data.shape}")
-            
-            # Convert to NumPy array, ensuring we have a 2D shape (sequence_length, features)
-            if isinstance(window_data, pd.DataFrame):
-                # For DataFrame, values gives us a 2D array of shape (seq_len, features)
-                sequence = window_data.values
-                logger.info(f"Sequence from DataFrame shape: {sequence.shape}")
-            else:
-                # For Series, values might give 1D, so reshape if needed
-                sequence = window_data.values
-                logger.info(f"Sequence from Series initial shape: {sequence.shape}")
-                if sequence.ndim == 1:
-                    sequence = sequence.reshape(-1, 1)  # Make it 2D
-                    logger.info(f"Reshaped sequence shape: {sequence.shape}")
-            
-            sequences.append(sequence)
-        
-        # Stack sequences and ensure correct shape for TFT model
+        # Ensure there's enough data to form at least one sequence
+        if len(market_normalized) >= self.sequence_length:
+            for i in range(len(market_normalized) - self.sequence_length + 1):
+                # Get data for this sequence window
+                window_data = market_normalized.iloc[i:i + self.sequence_length]
+                logger.debug(f"[{self.__class__.__name__}] Loop {i}: window_data shape: {window_data.shape}")
+                
+                # Convert to NumPy array, ensuring we have a 2D shape (sequence_length, features)
+                if isinstance(window_data, pd.DataFrame):
+                    sequence = window_data.values
+                    logger.debug(f"[{self.__class__.__name__}] Loop {i}: sequence from DataFrame shape: {sequence.shape}")
+                elif isinstance(window_data, pd.Series):
+                    sequence = window_data.values
+                    logger.debug(f"[{self.__class__.__name__}] Loop {i}: sequence from Series initial shape: {sequence.shape}")
+                    if sequence.ndim == 1:
+                        # This implies that market_normalized might have only one column.
+                        sequence = sequence.reshape(-1, 1)  # Make it 2D: (sequence_length, 1)
+                        logger.debug(f"[{self.__class__.__name__}] Loop {i}: Reshaped 1D sequence to: {sequence.shape}")
+                else:
+                    logger.warning(f"[{self.__class__.__name__}] Loop {i}: window_data is of unexpected type: {type(window_data)}. Converting to values directly.")
+                    sequence = window_data.values # Fallback
+                    if sequence.ndim == 1: # Ensure 2D if it became 1D
+                        sequence = sequence.reshape(-1,1)
+                    logger.debug(f"[{self.__class__.__name__}] Loop {i}: sequence from unexpected type, shape: {sequence.shape}")
+
+                sequences.append(sequence)
+        else:
+            logger.warning(f"[{self.__class__.__name__}] Not enough data in market_normalized (len: {len(market_normalized)}) to form a sequence of length {self.sequence_length}. Returning empty array.")
+            return np.array([]) # Return empty if no sequences can be formed
+
+        if not sequences:
+            logger.warning(f"[{self.__class__.__name__}] No sequences were created. market_normalized len: {len(market_normalized)}, sequence_length: {self.sequence_length}. Returning empty array.")
+            return np.array([])
+
         features = np.array(sequences)
-        logger.info(f"Stacked features shape: {features.shape}")
+        logger.info(f"[{self.__class__.__name__}] Stacked sequences into 'features' with shape: {features.shape}")
         
         # If we have a shape issue with dimensions, resolve it here
-        # If features is a 3D array with shape (1, n, m), remove the batch dimension
+        # If features is a 3D array with shape (1, n, m), remove the batch dimension (common if only one sequence was created)
         if features.ndim == 3 and features.shape[0] == 1:
-            # Remove batch dimension for single sample
             features = features.squeeze(0)
-            logger.info(f"Squeezed features shape: {features.shape}")
+            logger.info(f"[{self.__class__.__name__}] Squeezed features shape (dim 0 was 1): {features.shape}")
         
-        # Handle specific case where we have a 2D array with shape (n, 1)
-        # This is the specific error we're seeing in pytest.txt
+        # Handle specific case where we have a 2D array with shape (n, 1) - this should NOT be the final output for most models
+        # This might indicate that `market_normalized` only had one feature column, and only one sequence was generated and squeezed.
         if features.ndim == 2 and features.shape[1] == 1:
-            # Convert to 1D array by flattening
+            logger.warning(f"[{self.__class__.__name__}] 'features' has shape {features.shape} (n, 1). This is unusual for sequence features. Flattening to 1D.")
             features = features.flatten()
-            logger.info(f"Flattened features with shape (n, 1) to 1D: {features.shape}")
+            logger.info(f"[{self.__class__.__name__}] Flattened features with shape (n, 1) to 1D: {features.shape}")
         
-        # Final check - ensure we don't have a 2D array with shape (n, 1) which causes the error
+        # Final check - ensure we don't have a 2D array with shape (n, 1) which causes the error "Data must be 1-dimensional"
+        # This specific check might be too aggressive if a (N,1) shape is legitimately needed by some specific downstream Keras layer.
+        # However, the error message implies it's not expected.
         if features.ndim == 2 and features.shape[1] == 1:
-            logger.warning("Still detected problematic (n, 1) shape - forcing flatten")
+            logger.warning(f"[{self.__class__.__name__}] Still detected problematic (n, 1) shape post-processing - forcing flatten again. Shape: {features.shape}")
             features = features.flatten()
-            logger.info(f"Final flattened shape: {features.shape}")
+            logger.info(f"[{self.__class__.__name__}] Final flattened shape: {features.shape}")
         
-        logger.info(f"Final features shape: {features.shape}")
+        logger.info(f"[{self.__class__.__name__}] Final features shape to be returned: {features.shape}")
         return features
 
     def generate_features(self, df: pd.DataFrame) -> pd.DataFrame:

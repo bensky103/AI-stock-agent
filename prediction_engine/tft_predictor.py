@@ -251,10 +251,16 @@ class TFTPredictor:
             if df.empty:
                 raise TFTPredictorError("Input DataFrame for predict() is empty")
             
-            logger.info(f"TFTPredictor.predict called with df of shape: {df.shape}. Assuming it's preformatted by __call__ or similar.")
+            logger.info(f"[{self.__class__.__name__}] TFTPredictor.predict called with df of shape: {df.shape}. Dtypes:\n{df.dtypes}. Assuming it's preformatted by __call__ or similar.")
+            logger.debug(f"[{self.__class__.__name__}] TFTPredictor.predict input df head:\n{df.head()}")
 
             raw_predictions_output = self.model.predict(df) 
-            
+            logger.info(f"[{self.__class__.__name__}] Output type from self.model.predict: {type(raw_predictions_output)}")
+            if isinstance(raw_predictions_output, np.ndarray):
+                logger.info(f"[{self.__class__.__name__}] Output shape from self.model.predict: {raw_predictions_output.shape}")
+            elif isinstance(raw_predictions_output, dict):
+                logger.info(f"[{self.__class__.__name__}] Output keys from self.model.predict: {list(raw_predictions_output.keys())}")
+
             if isinstance(raw_predictions_output, np.ndarray):
                 predictions_array = raw_predictions_output 
                 
@@ -284,7 +290,7 @@ class TFTPredictor:
                     'symbols': symbols_placeholder, 
                     'raw_predictions': {'p50': raw_pred_dict_p50_equivalent}
                 }
-                logger.info(f"Formatted numpy predictions. Array shape: {predictions_array.shape}")
+                logger.info(f"[{self.__class__.__name__}] Formatted numpy predictions. Array shape: {predictions_array.shape}")
 
             elif isinstance(raw_predictions_output, dict) and 'p50' in raw_predictions_output : # Previous structure
                 # This path is less likely if self.model.predict() returns a numpy array (typical for Keras)
@@ -443,9 +449,14 @@ class TFTPredictor:
             # Ensure model config is loaded to get necessary column names etc.
             if not hasattr(self, 'model_config') or not self.model_config:
                 self._load_config() # Loads self.model_config
+            if not hasattr(self, 'model') or self.model is None: # Ensure model is loaded to access hparams if needed by _load_config or here
+                self._load_model()
 
             # Attempt to get column name configurations from self.model_config["model_config"]
             m_config = self.model_config.get("model_config", {})
+            logger.info(f"[{self.__class__.__name__}] Loaded m_config from model_config.json. Keys: {list(m_config.keys()) if isinstance(m_config, dict) else 'm_config is not a dict'}")
+            if isinstance(m_config, dict):
+                logger.debug(f"[{self.__class__.__name__}] m_config content: {m_config}")
             
             expected_feature_names = m_config.get("time_varying_unknown_reals", 
                                        m_config.get("input_obs_loc", 
@@ -494,8 +505,9 @@ class TFTPredictor:
             
             final_df_for_model = pd.concat(all_dfs_data_for_predict_call).reset_index(drop=True)
 
-            logger.info(f"Constructed DataFrame for model prediction with shape: {final_df_for_model.shape}")
-            logger.debug(f"DataFrame head for model:\n{final_df_for_model.head()}")
+            logger.info(f"[{self.__class__.__name__}] Constructed DataFrame for model prediction with shape: {final_df_for_model.shape}")
+            logger.info(f"[{self.__class__.__name__}] Dtypes of constructed DataFrame:\n{final_df_for_model.dtypes}")
+            logger.debug(f"[{self.__class__.__name__}] DataFrame head for model:\n{final_df_for_model.head()}")
 
             # Load model if not already loaded (moved from self.predict to here)
             if self.model is None:
