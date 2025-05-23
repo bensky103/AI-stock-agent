@@ -112,8 +112,8 @@ class TFTPredictor:
         except (yaml.YAMLError, json.JSONDecodeError, KeyError) as e:
             raise TFTPredictorError(f"Error loading configuration: {str(e)}")
     
-        def _load_model(self):
-            """
+    def _load_model(self):
+        """
         Load the trained TFT model.
         
         Returns:
@@ -140,11 +140,22 @@ class TFTPredictor:
                 if not weights_path.exists():
                     weights_path = self.model_path / "model.weights.h5"
                 
-                if not weights_path.exists():
-                    raise TFTPredictorError(f"Model weights not found in {self.model_path}")
+                # Ensure weights_path is absolute
+                absolute_weights_path = weights_path.resolve()
+
+                if not absolute_weights_path.exists():
+                    # Log which paths were checked if still not found
+                    checked_paths = [
+                        str(self.model_path / "best_model.weights.h5"), 
+                        str(self.model_path / "model.weights.h5"),
+                        str(absolute_weights_path) # Log the resolved absolute path attempted
+                    ]
+                    logger.error(f"Model weights .h5 file not found after checking paths: {checked_paths}")
+                    raise TFTPredictorError(f"Model weights .h5 file not found. Checked: {checked_paths}")
                 
+                self.logger.info(f"Attempting to load weights from: {str(absolute_weights_path)}")
                 # Load the model weights
-                model.load(self.model_path) # <-- Correction is here
+                model.load_weights(str(absolute_weights_path))
                 
                 return model
                 
