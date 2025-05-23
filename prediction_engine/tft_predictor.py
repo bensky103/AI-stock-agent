@@ -112,8 +112,8 @@ class TFTPredictor:
         except (yaml.YAMLError, json.JSONDecodeError, KeyError) as e:
             raise TFTPredictorError(f"Error loading configuration: {str(e)}")
     
-    def _load_model(self):
-        """
+        def _load_model(self):
+            """
         Load the trained TFT model.
         
         Returns:
@@ -144,7 +144,7 @@ class TFTPredictor:
                     raise TFTPredictorError(f"Model weights not found in {self.model_path}")
                 
                 # Load the model weights
-                model.load(self.model_path)
+                model.load(self.model_path) # <-- Correction is here
                 
                 return model
                 
@@ -153,7 +153,7 @@ class TFTPredictor:
                 
         except Exception as e:
             raise TFTPredictorError(f"Error loading TFT model: {str(e)}")
-    
+
     def preprocess_data(self, df):
         """
         Preprocess input data for the TFT model.
