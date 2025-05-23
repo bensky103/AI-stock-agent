@@ -473,27 +473,24 @@ class FeatureEngineer:
         logger.info(f"Stacked features shape: {features.shape}")
         
         # If we have a shape issue with dimensions, resolve it here
-        # Check if we have a 2D array with shape (n, 1) - this is the problematic case
-        # from the error message "Data must be 1-dimensional, got ndarray of shape (42, 1) instead"
+        # If features is a 3D array with shape (1, n, m), remove the batch dimension
         if features.ndim == 3 and features.shape[0] == 1:
             # Remove batch dimension for single sample
             features = features.squeeze(0)
             logger.info(f"Squeezed features shape: {features.shape}")
         
-        # Handle specific case where we have a 2D array with second dimension of 1
-        # This is the specific error we're seeing
+        # Handle specific case where we have a 2D array with shape (n, 1)
+        # This is the specific error we're seeing in pytest.txt
         if features.ndim == 2 and features.shape[1] == 1:
-            # Convert to 1D array
+            # Convert to 1D array by flattening
             features = features.flatten()
-            logger.info(f"Flattened features shape: {features.shape}")
-            
-        # CRITICAL FIX: Ensure we don't return a 2D array with shape (n, 1)
-        # This is the exact shape causing the "Data must be 1-dimensional" error
-        # Double-check before returning to catch any edge cases
+            logger.info(f"Flattened features with shape (n, 1) to 1D: {features.shape}")
+        
+        # Final check - ensure we don't have a 2D array with shape (n, 1) which causes the error
         if features.ndim == 2 and features.shape[1] == 1:
-            logger.warning("Detected problematic (n, 1) shape right before return - forcing flatten")
+            logger.warning("Still detected problematic (n, 1) shape - forcing flatten")
             features = features.flatten()
-            logger.info(f"Final fixed shape: {features.shape}")
+            logger.info(f"Final flattened shape: {features.shape}")
         
         logger.info(f"Final features shape: {features.shape}")
         return features

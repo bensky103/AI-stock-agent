@@ -247,8 +247,12 @@ class EnhancedStockPredictor:
                         last_sequence = last_sequence.reshape(1, -1, 1)
                     elif len(last_sequence.shape) == 2:
                         if last_sequence.shape[1] == 1:
-                            # If shape is [sequence_length, 1], reshape to [1, sequence_length, 1]
-                            self.logger.info(f"Reshaping 2D array with second dimension 1 from {last_sequence.shape} to 3D")
+                            # If shape is [sequence_length, 1], first try flattening to 1D
+                            self.logger.info(f"Flattening 2D array with shape {last_sequence.shape} to 1D")
+                            # This is the shape that's causing the error in pytest.txt
+                            last_sequence = last_sequence.flatten()
+                            # Then reshape to 3D for the model [1, sequence_length, 1]
+                            self.logger.info(f"Reshaping flattened array of shape {last_sequence.shape} to 3D")
                             last_sequence = last_sequence.reshape(1, -1, 1)
                         else:
                             # If shape is [sequence_length, features], add batch dimension
@@ -283,16 +287,42 @@ class EnhancedStockPredictor:
                                         self.logger.info("Attempting emergency flatten of tensor")
                                         # Convert to numpy, flatten, then back to tensor
                                         flat_data = last_sequence.cpu().numpy().flatten()
-                                        flat_tensor = torch.FloatTensor(flat_data).to(self.device)
-                                        self.logger.info(f"Flattened tensor shape: {flat_tensor.shape}")
                                         
-                                        # Try with flattened tensor
-                                        pred, uncertainty = model(flat_tensor)
-                                        self.logger.info("Prediction with flattened tensor succeeded")
+                                        # Reshape to match expected model input:
+                                        # First, determine sequence length (assume it's the second dimension of the original tensor)
+                                        if len(last_sequence.shape) >= 2:
+                                            seq_len = last_sequence.shape[1]
+                                        else:
+                                            # If 1D, use length divided by sequence_length as a guess
+                                            seq_len = len(flat_data) // self.sequence_length
+                                            if seq_len == 0:
+                                                seq_len = len(flat_data)  # Use full length if too small
+                                                
+                                        # Reshape to [1, seq_len, remainder] for model
+                                        num_features = len(flat_data) // seq_len
+                                        if num_features == 0:
+                                            num_features = 1  # At least one feature
+                                        
+                                        # Make sure dimensions work out
+                                        if seq_len * num_features > len(flat_data):
+                                            # If there's a mismatch, pad with zeros
+                                            pad_size = seq_len * num_features - len(flat_data)
+                                            flat_data = np.pad(flat_data, (0, pad_size), 'constant')
+                                        
+                                        reshaped_data = flat_data.reshape(1, seq_len, num_features)
+                                        self.logger.info(f"Reshaped emergency tensor to shape: {reshaped_data.shape}")
+                                        
+                                        # Convert back to tensor
+                                        fixed_tensor = torch.FloatTensor(reshaped_data).to(self.device)
+                                        self.logger.info(f"Fixed tensor shape: {fixed_tensor.shape}")
+                                        
+                                        # Try with fixed tensor
+                                        pred, uncertainty = model(fixed_tensor)
+                                        self.logger.info("Prediction with reshaped tensor succeeded")
                                         pred = pred.cpu().numpy()[0][0] if len(pred.shape) > 1 else pred.cpu().numpy()[0]
                                         uncertainty = uncertainty.cpu().numpy()[0][0] if uncertainty is not None and len(uncertainty.shape) > 1 else (uncertainty.cpu().numpy()[0] if uncertainty is not None else None)
                                     except Exception as flatten_err:
-                                        self.logger.error(f"Emergency flatten failed: {str(flatten_err)}")
+                                        self.logger.error(f"Emergency reshape failed: {str(flatten_err)}")
                                         raise
                                 else:
                                     raise
