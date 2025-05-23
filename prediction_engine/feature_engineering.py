@@ -391,23 +391,43 @@ class FeatureEngineer:
         Returns:
             numpy array of processed features
         """
+        # Debug logging
+        logger.setLevel(logging.DEBUG)
+        logger.debug(f"prepare_features called with market_data shape: {market_data.shape}")
+        logger.debug(f"self.sequence_length = {self.sequence_length}")
+        
         # Ensure we have enough data
         if len(market_data) < self.sequence_length:
+            logger.warning(f"Insufficient data: got {len(market_data)} rows, need at least {self.sequence_length}")
             raise ValueError(f"Need at least {self.sequence_length} time steps of market data")
         
-        # Calculate technical indicators
-        market_with_indicators = self.calculate_technical_indicators(market_data)
-        
-        # Normalize market data
-        market_normalized, _, _ = self.normalize_features(market_with_indicators)
-        
-        # Prepare sequences
-        sequences = []
-        for i in range(len(market_normalized) - self.sequence_length + 1):
-            sequence = market_normalized.iloc[i:i + self.sequence_length].values
-            sequences.append(sequence)
-        
-        return np.array(sequences)
+        try:
+            # Calculate technical indicators
+            logger.debug("Calculating technical indicators")
+            market_with_indicators = self.calculate_technical_indicators(market_data)
+            logger.debug(f"Indicators calculated, result shape: {market_with_indicators.shape}")
+            
+            # Normalize market data
+            logger.debug("Normalizing market data")
+            market_normalized, _, _ = self.normalize_features(market_with_indicators)
+            logger.debug(f"Data normalized, result shape: {market_normalized.shape}")
+            
+            # Prepare sequences
+            logger.debug(f"Preparing sequences with length {self.sequence_length}")
+            sequences = []
+            for i in range(len(market_normalized) - self.sequence_length + 1):
+                sequence = market_normalized.iloc[i:i + self.sequence_length].values
+                sequences.append(sequence)
+            
+            result = np.array(sequences)
+            logger.debug(f"Sequences prepared, result shape: {result.shape}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in prepare_features: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            raise
 
     def generate_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Generate features from market data.
