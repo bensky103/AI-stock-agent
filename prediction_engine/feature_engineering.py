@@ -43,7 +43,40 @@ class MarketRegimeDetector:
         # Calculate trend indicators
         sma_20 = SMAIndicator(close=df['close'], window=20).sma_indicator()
         sma_50 = SMAIndicator(close=df['close'], window=50).sma_indicator()
-        adx = ADXIndicator(high=df['high'], low=df['low'], close=df['close']).adx()
+        
+        # ADX calculation with data length check
+        adx_window = 14  # Default window for ADXIndicator
+        min_periods_adx = (2 * adx_window) - 1
+        adx = pd.Series(np.nan, index=df.index, name='adx') # Initialize with NaNs
+
+        if len(df) >= min_periods_adx:
+            try:
+                adx_indicator = ADXIndicator(
+                    high=df['high'], 
+                    low=df['low'], 
+                    close=df['close'], 
+                    window=adx_window, 
+                    fillna=True
+                )
+                adx = adx_indicator.adx()
+            except IndexError as ie:
+                logger.warning(
+                    f"[MarketRegimeDetector] IndexError calculating ADX({adx_window}) with {len(df)} rows (min {min_periods_adx}): {ie}. "
+                    f"ADX will contain NaNs."
+                )
+                # adx is already initialized with NaNs
+            except Exception as e:
+                logger.error(
+                    f"[MarketRegimeDetector] Unexpected error calculating ADX({adx_window}) with {len(df)} rows: {e}. "
+                    f"ADX will contain NaNs."
+                )
+                # adx is already initialized with NaNs
+        else:
+            logger.warning(
+                f"[MarketRegimeDetector] Insufficient data ({len(df)} rows) for ADX({adx_window}). Need {min_periods_adx}. "
+                f"ADX will contain NaNs."
+            )
+            # adx is already initialized with NaNs
         
         # Calculate momentum indicators
         rsi = RSIIndicator(close=df['close']).rsi()
