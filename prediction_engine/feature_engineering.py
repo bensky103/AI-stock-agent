@@ -180,49 +180,49 @@ class FeatureEngineer:
         volume_col = field_map['volume']
         
         # Trend indicators
-        result['sma_20'] = SMAIndicator(close=df[close_col], window=20).sma_indicator()
-        result['sma_50'] = SMAIndicator(close=df[close_col], window=50).sma_indicator()
-        result['ema_20'] = EMAIndicator(close=df[close_col], window=20).ema_indicator()
-        result['ema_50'] = EMAIndicator(close=df[close_col], window=50).ema_indicator()
+        result['sma_20'] = SMAIndicator(close=df[close_col].squeeze('columns'), window=20).sma_indicator()
+        result['sma_50'] = SMAIndicator(close=df[close_col].squeeze('columns'), window=50).sma_indicator()
+        result['ema_20'] = EMAIndicator(close=df[close_col].squeeze('columns'), window=20).ema_indicator()
+        result['ema_50'] = EMAIndicator(close=df[close_col].squeeze('columns'), window=50).ema_indicator()
         
         # Momentum indicators
-        result['rsi_14'] = RSIIndicator(close=df[close_col]).rsi()
-        macd = MACD(close=df[close_col])
+        result['rsi_14'] = RSIIndicator(close=df[close_col].squeeze('columns')).rsi()
+        macd = MACD(close=df[close_col].squeeze('columns'))
         result['macd'] = macd.macd()
         result['macd_signal'] = macd.macd_signal()
         result['macd_hist'] = macd.macd_diff()
         
         # Volatility indicators
-        bb = BollingerBands(close=df[close_col])
+        bb = BollingerBands(close=df[close_col].squeeze('columns'))
         result['bb_upper'] = bb.bollinger_hband()
         result['bb_middle'] = bb.bollinger_mavg()
         result['bb_lower'] = bb.bollinger_lband()
         result['bb_width'] = (result['bb_upper'] - result['bb_lower']) / result['bb_middle']
-        result['atr_14'] = AverageTrueRange(high=df[high_col], low=df[low_col], close=df[close_col]).average_true_range()
+        result['atr_14'] = AverageTrueRange(high=df[high_col].squeeze('columns'), low=df[low_col].squeeze('columns'), close=df[close_col].squeeze('columns')).average_true_range()
         
         # Volume indicators
         result['vwap'] = VolumeWeightedAveragePrice(
-            high=df[high_col], low=df[low_col], close=df[close_col], volume=df[volume_col]
+            high=df[high_col].squeeze('columns'), low=df[low_col].squeeze('columns'), close=df[close_col].squeeze('columns'), volume=df[volume_col].squeeze('columns')
         ).volume_weighted_average_price()
         result['mfi_14'] = MFIIndicator(
-            high=df[high_col], low=df[low_col], close=df[close_col], volume=df[volume_col]
+            high=df[high_col].squeeze('columns'), low=df[low_col].squeeze('columns'), close=df[close_col].squeeze('columns'), volume=df[volume_col].squeeze('columns')
         ).money_flow_index()
         
         # Additional momentum indicators
-        stoch = StochasticOscillator(high=df[high_col], low=df[low_col], close=df[close_col])
+        stoch = StochasticOscillator(high=df[high_col].squeeze('columns'), low=df[low_col].squeeze('columns'), close=df[close_col].squeeze('columns'))
         result['stoch_k'] = stoch.stoch()
         result['stoch_d'] = stoch.stoch_signal()
         
         # Trend strength indicators
-        result['adx_14'] = ADXIndicator(high=df[high_col], low=df[low_col], close=df[close_col]).adx()
+        result['adx_14'] = ADXIndicator(high=df[high_col].squeeze('columns'), low=df[low_col].squeeze('columns'), close=df[close_col].squeeze('columns')).adx()
         
         # Market regime
         if self.detect_regime:
             # Create a temporary DataFrame with standardized column names
             regime_df = pd.DataFrame({
-                'close': df[close_col],
-                'high': df[high_col],
-                'low': df[low_col]
+                'close': df[close_col].squeeze('columns'),
+                'high': df[high_col].squeeze('columns'),
+                'low': df[low_col].squeeze('columns')
             })
             result['market_regime'] = self.market_regime_detector.detect_regime(regime_df)
         
