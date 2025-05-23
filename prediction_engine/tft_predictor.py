@@ -20,14 +20,17 @@ os.makedirs('logs', exist_ok=True)
 
 # Configure logging
 logging.basicConfig(
-    level=logging.WARNING,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
     handlers=[
         logging.FileHandler('logs/tft_predictor.log'),
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
+# Clear existing handlers to prevent duplicates if they're set by basicConfig
+if len(logger.handlers) > 1:
+    logger.handlers = [logger.handlers[0]]  # Keep only the first handler
 
 class TFTPredictorError(Exception):
     """Exception class for TFT predictor errors."""
@@ -334,8 +337,7 @@ class TFTPredictor:
         Returns:
             Tuple of (predictions, uncertainty)
         """
-        import logging
-        logger = logging.getLogger(__name__)
+        # Use the class logger instead of creating a new one
         logger.info(f"TFTPredictor.__call__ with input shape: {sequence_tensor.shape}")
         
         # Convert PyTorch tensor to numpy
@@ -346,10 +348,25 @@ class TFTPredictor:
             
         logger.info(f"Converted to numpy with shape: {sequence_np.shape}")
         
-        # Check input shape
-        if len(sequence_np.shape) != 3:
-            logger.error(f"Expected 3D tensor with shape [batch_size, seq_len, features], got {sequence_np.shape}")
-            raise ValueError(f"Expected 3D tensor with shape [batch_size, seq_len, features], got {sequence_np.shape}")
+        # Handle the specific case where we have a 2D array with shape (sequence_length, 1)
+        # which matches the error "Data must be 1-dimensional, got ndarray of shape (42, 1) instead"
+        if len(sequence_np.shape) == 2 and sequence_np.shape[1] == 1:
+            logger.info(f"Reshaping 2D array with shape {sequence_np.shape} to 1D")
+            sequence_np = sequence_np.flatten()
+            # Now add batch and feature dimensions back
+            sequence_np = sequence_np.reshape(1, -1, 1)
+            logger.info(f"After reshape: {sequence_np.shape}")
+        # Check if input shape is 1D, which would need to be reshaped to 3D
+        elif len(sequence_np.shape) == 1:
+            logger.info(f"Reshaping 1D array with shape {sequence_np.shape} to 3D")
+            sequence_np = sequence_np.reshape(1, -1, 1)
+            logger.info(f"After reshape: {sequence_np.shape}")
+        # If tensor is already 3D, ensure first dimension is batch
+        elif len(sequence_np.shape) == 3:
+            logger.info(f"Using 3D tensor as is: {sequence_np.shape}")
+        else:
+            logger.error(f"Unexpected tensor shape: {sequence_np.shape}")
+            raise ValueError(f"Expected tensor with shape compatible with [batch_size, seq_len, features], got {sequence_np.shape}")
         
         batch_size, seq_len, n_features = sequence_np.shape
         
@@ -361,10 +378,20 @@ class TFTPredictor:
             # Add required columns
             df['symbol'] = ['DUMMY'] * batch_size
             df['datetime'] = [pd.Timestamp.now()] * batch_size
-            df['open'] = sequence_np[0, -1, 0]  # Use last timestep value
-            df['high'] = sequence_np[0, -1, 0] * 1.01  # Approximate
-            df['low'] = sequence_np[0, -1, 0] * 0.99  # Approximate
-            df['close'] = sequence_np[0, -1, 0]  # Use last timestep value
+            
+            # Use the last sequence value for the prediction features
+            if n_features > 0:
+                df['open'] = sequence_np[0, -1, 0]  # Use last timestep value
+                df['high'] = sequence_np[0, -1, 0] * 1.01  # Approximate
+                df['low'] = sequence_np[0, -1, 0] * 0.99  # Approximate
+                df['close'] = sequence_np[0, -1, 0]  # Use last timestep value
+            else:
+                # Fallback if we don't have features
+                df['open'] = 100.0  # Dummy value
+                df['high'] = 101.0
+                df['low'] = 99.0
+                df['close'] = 100.0
+            
             df['volume'] = [1000] * batch_size  # Dummy value
             
             # Set index

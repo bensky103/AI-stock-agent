@@ -22,7 +22,10 @@ from .sequence_preprocessor import SequencePreprocessor
 
 # Configure logging
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+# Clear existing handlers to prevent duplicates
+if logger.hasHandlers():
+    logger.handlers.clear()
+logger.setLevel(logging.INFO)  # Change from WARNING to INFO
 _handler = logging.StreamHandler()
 _formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 _handler.setFormatter(_formatter)
@@ -484,6 +487,14 @@ class FeatureEngineer:
             features = features.flatten()
             logger.info(f"Flattened features shape: {features.shape}")
             
+        # CRITICAL FIX: Ensure we don't return a 2D array with shape (n, 1)
+        # This is the exact shape causing the "Data must be 1-dimensional" error
+        # Double-check before returning to catch any edge cases
+        if features.ndim == 2 and features.shape[1] == 1:
+            logger.warning("Detected problematic (n, 1) shape right before return - forcing flatten")
+            features = features.flatten()
+            logger.info(f"Final fixed shape: {features.shape}")
+        
         logger.info(f"Final features shape: {features.shape}")
         return features
 

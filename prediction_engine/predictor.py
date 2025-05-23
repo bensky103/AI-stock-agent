@@ -38,9 +38,12 @@ class StockPredictorError(Exception):
 
 # Configure logging
 logger = logging.getLogger(__name__)
+# Clear existing handlers to prevent duplicates
+if logger.hasHandlers():
+    logger.handlers.clear()
 logger.setLevel(logging.INFO)  # Change from WARNING to INFO for our debug logs
 _handler = logging.StreamHandler()
-_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")  # Restore original format
+_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 _handler.setFormatter(_formatter)
 logger.addHandler(_handler)
 
@@ -274,16 +277,22 @@ class EnhancedStockPredictor:
                                     self.logger.error(f"Last sequence shape: {last_sequence.shape}")
                                     self.logger.error(f"Last sequence type: {type(last_sequence)}")
                                     
-                                    # Try to fix the dimensionality issue
-                                    if len(last_sequence.shape) == 3 and last_sequence.shape[2] == 1:
-                                        self.logger.info("Attempting to fix dimensionality by squeezing last dim")
-                                        fixed_sequence = last_sequence.squeeze(-1)
-                                        self.logger.info(f"Fixed shape: {fixed_sequence.shape}")
-                                        pred, uncertainty = model(fixed_sequence)
-                                        self.logger.info(f"Prediction successful with fix, shape: {pred.shape}")
-                                        pred = pred.cpu().numpy()[0][0]
-                                        uncertainty = uncertainty.cpu().numpy()[0][0] if uncertainty is not None else None
-                                    else:
+                                    # Try flattening the tensor to 1D
+                                    # This is a fallback attempt for when our previous fixes don't work
+                                    try:
+                                        self.logger.info("Attempting emergency flatten of tensor")
+                                        # Convert to numpy, flatten, then back to tensor
+                                        flat_data = last_sequence.cpu().numpy().flatten()
+                                        flat_tensor = torch.FloatTensor(flat_data).to(self.device)
+                                        self.logger.info(f"Flattened tensor shape: {flat_tensor.shape}")
+                                        
+                                        # Try with flattened tensor
+                                        pred, uncertainty = model(flat_tensor)
+                                        self.logger.info("Prediction with flattened tensor succeeded")
+                                        pred = pred.cpu().numpy()[0][0] if len(pred.shape) > 1 else pred.cpu().numpy()[0]
+                                        uncertainty = uncertainty.cpu().numpy()[0][0] if uncertainty is not None and len(uncertainty.shape) > 1 else (uncertainty.cpu().numpy()[0] if uncertainty is not None else None)
+                                    except Exception as flatten_err:
+                                        self.logger.error(f"Emergency flatten failed: {str(flatten_err)}")
                                         raise
                                 else:
                                     raise
@@ -295,7 +304,7 @@ class EnhancedStockPredictor:
                             'error': f"Model prediction error: {str(model_error)}",
                             'error_type': type(model_error).__name__,
                             'feature_shape': str(features.shape),
-                            'last_sequence_shape': str(last_sequence.shape)
+                            'last_sequence_shape': str(last_sequence.shape) if 'last_sequence' in locals() else 'Unknown'
                         }
                         continue
                     
