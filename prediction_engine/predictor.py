@@ -222,14 +222,42 @@ class EnhancedStockPredictor:
                 if symbol in self.models and self.models[symbol] is not None:
                     # Get the last sequence for prediction
                     last_sequence = features[-self.sequence_length:]
-                    last_sequence = torch.FloatTensor(last_sequence).unsqueeze(0).to(self.device)
+                    
+                    # Debug information
+                    self.logger.info(f"Feature shape before model: {last_sequence.shape}")
+                    
+                    # Ensure data has the right dimensionality for the model
+                    # TFT models expect input of shape [batch_size, sequence_length, num_features]
+                    if len(last_sequence.shape) == 1:
+                        # If 1D, reshape to [1, sequence_length, 1]
+                        last_sequence = last_sequence.reshape(1, -1, 1)
+                    elif len(last_sequence.shape) == 2:
+                        if last_sequence.shape[1] == 1:
+                            # If shape is [sequence_length, 1], reshape to [1, sequence_length, 1]
+                            last_sequence = last_sequence.reshape(1, -1, 1)
+                        else:
+                            # If shape is [sequence_length, features], add batch dimension
+                            last_sequence = np.expand_dims(last_sequence, axis=0)
+                    
+                    # Convert to tensor and move to device
+                    last_sequence = torch.FloatTensor(last_sequence).to(self.device)
+                    self.logger.info(f"Tensor shape for model: {last_sequence.shape}")
                     
                     # Make prediction
-                    with torch.no_grad():
-                        model = self.models[symbol]
-                        pred, uncertainty = model(last_sequence)
-                        pred = pred.cpu().numpy()[0][0]
-                        uncertainty = uncertainty.cpu().numpy()[0][0] if uncertainty is not None else None
+                    try:
+                        with torch.no_grad():
+                            model = self.models[symbol]
+                            pred, uncertainty = model(last_sequence)
+                            pred = pred.cpu().numpy()[0][0]
+                            uncertainty = uncertainty.cpu().numpy()[0][0] if uncertainty is not None else None
+                    except Exception as model_error:
+                        self.logger.error(f"Error during model prediction: {str(model_error)}")
+                        predictions[symbol] = {
+                            'error': f"Model prediction error: {str(model_error)}",
+                            'feature_shape': str(features.shape),
+                            'last_sequence_shape': str(last_sequence.shape)
+                        }
+                        continue
                     
                     # Store prediction
                     # Handle both DataFrame with reset index and Series
