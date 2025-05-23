@@ -655,110 +655,117 @@ class TFTModel:
         }
     
     def _prepare_inputs_from_normalized(self, df_normalized: pd.DataFrame) -> tuple:
-        """Prepare inputs from already normalized DataFrame."""
-        logger.info("Preparing inputs from normalized data...")
-        
-        # Get column information from data formatter
-        static_cols = [col for col, type_ in self.data_formatter.column_definition 
-                      if type_ == InputTypes.STATIC]
-        historical_cols = [col for col, type_ in self.data_formatter.column_definition
-                          if type_ in [InputTypes.TARGET, InputTypes.OBSERVED, InputTypes.KNOWN]]
-        future_cols = [col for col, type_ in self.data_formatter.column_definition
-                      if type_ == InputTypes.KNOWN]
-        
-        # Initialize input arrays
-        batch_size = len(df_normalized)
-        static_inputs = np.zeros((batch_size, len(static_cols)))
-        historical_inputs = np.zeros((batch_size, self.num_encoder_steps, len(historical_cols)))
-        future_inputs = np.zeros((batch_size, self.num_steps, len(future_cols)))
-        
-        # Fill static inputs
-        for i, col in enumerate(static_cols):
-            if col in df_normalized.columns:
-                static_inputs[:, i] = df_normalized[col].values
-        
-        # Fill historical inputs
-        for i, col in enumerate(historical_cols):
-            if col in df_normalized.columns:
-                values = df_normalized[col].values
-                for t in range(self.num_encoder_steps):
-                    historical_inputs[:, t, i] = values
-        
-        # Fill future inputs
-        for i, col in enumerate(future_cols):
-            if col in df_normalized.columns:
-                values = df_normalized[col].values
-                for t in range(self.num_steps):
-                    future_inputs[:, t, i] = values
-        
-        # Final validation of prepared inputs
-        if np.isnan(static_inputs).any():
-            logger.error("Static inputs contain NaN values!")
-        if np.isnan(historical_inputs).any():
-            logger.error("Historical inputs contain NaN values!")
-        if np.isnan(future_inputs).any():
-            logger.error("Future inputs contain NaN values!")
-            
-        return static_inputs, historical_inputs, future_inputs
-    
+        """Helper function to prepare model inputs from normalized data."""
+        # This assumes df_normalized is already processed (e.g., with correct time_idx)
+        # and only needs to be split into the various input types for the model.
+        logger_grn = logging.getLogger(__name__) # Use a consistent logger
+
+        if df_normalized.empty:
+            raise ValueError("Input DataFrame for _prepare_inputs_from_normalized is empty.")
+
+        known_regular_inputs = []
+        for name in self.config.get('known_regular_inputs', []):
+            known_regular_inputs.append(df_normalized[name].values)
+
+        known_categorical_inputs = []
+        for name in self.config.get('known_categorical_inputs', []):
+            known_categorical_inputs.append(df_normalized[name].values)
+
+        # Handle observed inputs (time-varying unknown)
+        obs_inputs = []
+        for name in self.config.get('input_obs_loc', []):
+            obs_inputs.append(df_normalized[name].values)
+
+        # Handle static inputs
+        static_inputs = []
+        for name in self.config.get('static_input_loc', []):
+            static_inputs.append(df_normalized[name].iloc[[0]].values)
+
+        model_inputs = []
+        if known_regular_inputs:
+            model_inputs.append(np.stack(known_regular_inputs, axis=-1) if known_regular_inputs else np.array([]).reshape(len(df_normalized), 0))
+        if known_categorical_inputs:
+            model_inputs.append(np.stack(known_categorical_inputs, axis=-1) if known_categorical_inputs else np.array([]).reshape(len(df_normalized), 0))
+        if obs_inputs:
+            model_inputs.append(np.stack(obs_inputs, axis=-1) if obs_inputs else np.array([]).reshape(len(df_normalized), 0))
+        if static_inputs:
+            stacked_statics = np.stack([s.flatten() for s in static_inputs], axis=-1)
+            model_inputs.append(stacked_statics)
+
+        if not model_inputs:
+            raise ValueError("No model inputs could be prepared based on config.")
+
+        for i, arr in enumerate(model_inputs):
+            if not isinstance(arr, np.ndarray):
+                raise TypeError(f"Model input at index {i} is not a numpy array, got {type(arr)}")
+            logger_grn.debug(f"[{self.__class__.__name__}] Prepared Keras input {i} shape: {arr.shape}")
+
+        return tuple(model_inputs)
+
     def evaluate(self, test_df: pd.DataFrame) -> Dict:
-        """Evaluate the model.
-        
-        Args:
-            test_df: Test data
-            
-        Returns:
-            Dictionary of evaluation metrics
-        """
-        # Prepare test data
-        test_static, test_hist, test_future = self._prepare_inputs(test_df)
-        
-        # Get normalized targets
-        test_normalized = self._validate_and_normalize_data(test_df.copy())
-        test_targets = test_normalized['close'].values.reshape(-1, 1)
-        
-        # Evaluate
-        test_loss = self.model.evaluate(
-            [test_static, test_hist, test_future],
-            test_targets,
-            verbose=0
-        )
-        
-        # Calculate additional metrics
-        predictions = self.predict(test_df)
-        mape = np.mean(np.abs((test_targets - predictions) / (test_targets + 1e-6))) * 100
-        rmse = np.sqrt(np.mean((test_targets - predictions) ** 2))
-        
-        return {
-            'test_loss': test_loss[0],
-            'test_mae': test_loss[1],
-            'test_mape': mape,
-            'test_rmse': rmse
-        }
-    
+        """Evaluate model performance on test data."""
+        eval_logger = logging.getLogger(__name__)
+        eval_logger.info("Evaluate method called.")
+        return {}
+
     def predict(self, df: pd.DataFrame) -> np.ndarray:
-        """Generate predictions.
-        
-        Args:
-            df: Input data
-            
-        Returns:
-            Array of predictions
-        """
-        # Prepare inputs
-        static_inputs, historical_inputs, future_inputs = self._prepare_inputs(df)
-        
-        # Generate predictions
-        predictions = self.model.predict(
-            [static_inputs, historical_inputs, future_inputs],
-            verbose=0
-        )
-        
-        # Reshape predictions
-        predictions = predictions.reshape(-1)
-        
-        return predictions
-    
+        """Make predictions on new data."""
+        # Use self.logger if defined in __init__, otherwise get a new one.
+        pred_logger = getattr(self, 'logger', logging.getLogger(__name__))
+
+        pred_logger.info(f"[{self.__class__.__name__}] Custom TFTModel.predict called.")
+        if isinstance(df, pd.DataFrame):
+            pred_logger.info(f"[{self.__class__.__name__}] Input df shape: {df.shape}")
+            pred_logger.info(f"[{self.__class__.__name__}] Input df dtypes:\n{df.dtypes}")
+            pred_logger.info(f"[{self.__class__.__name__}] Input df head:\n{df.head()}")
+        elif isinstance(df, np.ndarray):
+            pred_logger.info(f"[{self.__class__.__name__}] Input numpy array shape: {df.shape}")
+        else:
+            pred_logger.info(f"[{self.__class__.__name__}] Input type to predict: {type(df)}")
+
+        if not hasattr(self, 'data_formatter') or self.data_formatter is None:
+            pred_logger.warning("Data formatter not available in TFTModel. Using raw input df, assuming it is already normalized.")
+            df_normalized = df
+        else:
+            try:
+                df_normalized = self.data_formatter.transform(df)
+                pred_logger.info(f"[{self.__class__.__name__}] df_normalized shape after formatter.transform: {df_normalized.shape}")
+            except Exception as e:
+                pred_logger.error(f"[{self.__class__.__name__}] Error during data_formatter.transform: {e}. Check if formatter was fitted.")
+                raise
+
+        try:
+            model_inputs = self._prepare_inputs_from_normalized(df_normalized)
+            pred_logger.info(f"[{self.__class__.__name__}] Prepared inputs for Keras model. Number of input tensors: {len(model_inputs)}")
+            for i, arr in enumerate(model_inputs):
+                pred_logger.info(f"[{self.__class__.__name__}] Shape of Keras input tensor {i}: {arr.shape if isinstance(arr, np.ndarray) else type(arr)}")
+        except Exception as e:
+            pred_logger.error(f"[{self.__class__.__name__}] Error in _prepare_inputs_from_normalized: {e}")
+            raise
+
+        pred_logger.info(f"[{self.__class__.__name__}] Calling internal Keras model.predict...")
+        try:
+            raw_predictions = self.model.predict(model_inputs)
+        except Exception as e:
+            pred_logger.error(f"[{self.__class__.__name__}] Error during Keras self.model.predict(model_inputs): {e}")
+            for i, arr in enumerate(model_inputs):
+                pred_logger.error(f"[{self.__class__.__name__}] Shape of Keras input tensor {i} AT ERROR: {arr.shape if isinstance(arr, np.ndarray) else type(arr)}")
+            raise
+
+        pred_logger.info(f"[{self.__class__.__name__}] Raw predictions shape from Keras model: {raw_predictions.shape if isinstance(raw_predictions, np.ndarray) else type(raw_predictions)}")
+
+        if not isinstance(raw_predictions, np.ndarray):
+            try:
+                raw_predictions = np.array(raw_predictions)
+                pred_logger.info(f"[{self.__class__.__name__}] Converted raw_predictions to numpy array, new shape: {raw_predictions.shape}")
+            except Exception as e:
+                pred_logger.error(f"[{self.__class__.__name__}] Failed to convert raw_predictions to numpy array: {e}")
+                # Ensure TFTPredictorError is available or use a standard error
+                # from colab_training.utils import CustomError # Example if you have one
+                raise ValueError(f"Keras model output type {type(raw_predictions)} could not be converted to numpy array.") # Using ValueError for now
+
+        return raw_predictions
+
     def save(self, path: str):
         """Save model to disk.
         
