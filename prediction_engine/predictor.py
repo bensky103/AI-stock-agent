@@ -294,9 +294,10 @@ class EnhancedStockPredictor:
                 # Make prediction
                 try:
                     self.logger.info(f"[{self.__class__.__name__}] Calling model for {symbol} with tensor of shape {model_input_tensor.shape if hasattr(model_input_tensor, 'shape') else type(model_input_tensor)}")
-                    model_to_use = self.models.get(symbol, self.models.get("default"))
+                    model_to_use = self._get_or_load_model(symbol)
+                    
                     if model_to_use is None:
-                        self.logger.error(f"[{self.__class__.__name__}] No model found for {symbol} or default. Skipping.")
+                        self.logger.error(f"[{self.__class__.__name__}] No model found for {symbol} or default via _get_or_load_model. Skipping.")
                         predictions[symbol] = {"error": f"Model not found for {symbol}"}
                         continue
                         
@@ -508,8 +509,62 @@ class EnhancedStockPredictor:
         return history
 
     def _get_or_load_model(self, symbol: str) -> Any:
-        # Implementation of _get_or_load_model method
-        pass
+        """Get a model from cache or load it from disk."""
+        if symbol in self.models:
+            self.logger.info(f"[{self.__class__.__name__}] Found existing model for {symbol} in cache.")
+            return self.models[symbol]
+
+        model_loaded = False
+        # Try to load symbol-specific model
+        symbol_model_path = self.saved_models_dir / symbol
+        symbol_config_path = symbol_model_path / "config.yaml" # Assuming TFTPredictor uses config.yaml
+
+        if symbol_model_path.exists() and symbol_config_path.exists():
+            try:
+                self.logger.info(f"[{self.__class__.__name__}] Attempting to load model for {symbol} from {symbol_model_path}")
+                model = TFTPredictor(
+                    model_path=str(symbol_model_path), # TFTPredictor expects model_path to be a dir
+                    config_path=str(symbol_config_path)
+                )
+                self.models[symbol] = model
+                self.logger.info(f"[{self.__class__.__name__}] Successfully loaded model for {symbol} from {symbol_model_path}")
+                model_loaded = True
+                return model
+            except TFTPredictorError as e:
+                self.logger.warning(f"[{self.__class__.__name__}] Failed to load symbol-specific model for {symbol} from {symbol_model_path}: {str(e)}. Falling back.")
+            except Exception as e:
+                self.logger.error(f"[{self.__class__.__name__}] Unexpected error loading symbol-specific model for {symbol} from {symbol_model_path}: {str(e)}")
+                # Optionally re-raise or handle as critical failure for the symbol
+
+        # Fallback: Try to load/use a "default" model if symbol-specific one failed or doesn't exist
+        if "default" in self.models:
+            self.logger.info(f"[{self.__class__.__name__}] Using cached default model for {symbol}.")
+            return self.models["default"]
+        
+        # Try to load the default model if not already loaded (e.g., from self.default_model_dir)
+        # This part assumes self.load_model() would populate self.model, and we might cache it as "default"
+        # Or directly load the default model here.
+        # The current self.load_model() loads into self.model, not self.models['default']
+        # Let's adjust to use self.default_model_dir if no specific or cached default is found
+        
+        default_config_path = self.default_model_dir / "config.yaml"
+        if self.default_model_dir.exists() and default_config_path.exists():
+            try:
+                self.logger.info(f"[{self.__class__.__name__}] Attempting to load default model from {self.default_model_dir} for {symbol}")
+                default_model = TFTPredictor(
+                    model_path=str(self.default_model_dir),
+                    config_path=str(default_config_path)
+                )
+                self.models["default"] = default_model # Cache it as default
+                self.logger.info(f"[{self.__class__.__name__}] Successfully loaded and cached default model from {self.default_model_dir}")
+                return default_model
+            except TFTPredictorError as e:
+                self.logger.warning(f"[{self.__class__.__name__}] Failed to load default model from {self.default_model_dir}: {str(e)}")
+            except Exception as e:
+                self.logger.error(f"[{self.__class__.__name__}] Unexpected error loading default model from {self.default_model_dir}: {str(e)}")
+
+        self.logger.warning(f"[{self.__class__.__name__}] No model could be loaded for {symbol} (specific or default).")
+        return None
 
 if __name__ == "__main__":
     # Example usage with memory-efficient settings
