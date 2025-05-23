@@ -300,7 +300,7 @@ class TFTModel:
         self.config = config
         self.data_formatter = StockFormatter()
         
-        # Model parameters
+        # Model parameters from config, with overrides for alignment
         self.hidden_layer_size = config.get('hidden_layer_size', 64)
         self.attention_head_size = config.get('attention_head_size', 4)
         self.dropout_rate = config.get('dropout_rate', 0.1)
@@ -309,10 +309,30 @@ class TFTModel:
         self.minibatch_size = config.get('minibatch_size', 64)
         self.num_epochs = config.get('num_epochs', 100)
         self.early_stopping_patience = config.get('early_stopping_patience', 10)
-        self.num_encoder_steps = config.get('num_encoder_steps', 100)
-        self.num_steps = config.get('num_steps', 20)
-        self.context_lengths = config.get('context_lengths', [1, 7, 14, 30])
         
+        # Core architectural parameters for input shapes - aligned with FeatureEngineer
+        self.num_encoder_steps = config.get('num_encoder_steps', 10) # Historical sequence length (from FeatureEngineer)
+        if self.num_encoder_steps != 10:
+            logger.warning(f"[{self.__class__.__name__}] Overriding num_encoder_steps from config ({self.num_encoder_steps}) to 10 for alignment.")
+            self.num_encoder_steps = 10
+
+        self.num_steps = config.get('num_steps', 5) # Future sequence length (prediction horizon)
+
+        # Explicit feature counts based on FeatureEngineer output and typical TFT structure
+        self.num_static_features = 1  # Assuming 1 static feature (e.g., placeholder or simple ID)
+        self.num_historical_features = 25 # From FeatureEngineer
+        
+        # Determine future feature count from StockFormatter's KNOWN input types
+        # This should be 0 if no InputTypes.KNOWN are defined in StockFormatter
+        future_cols_formatter = [col for col, type_ in self.data_formatter.column_definition if type_ == InputTypes.KNOWN and self.data_formatter.is_future_known(col)]
+        self.num_future_features = len(future_cols_formatter)
+        if self.num_future_features != 0:
+             logger.warning(f"[{self.__class__.__name__}] Model configured with {self.num_future_features} known future features based on StockFormatter. Keras model expects 0.")
+             # If Keras model structure (future input layer) expects 0, this might cause issues later if not handled.
+             # For now, let's assume _build_model will use this. The error log showed (1,5,0) previously for future inputs from Keras.
+             # This implies Keras was built with 0 future features. We will ensure _build_model uses 0.
+             self.num_future_features = 0 # Override to match Keras expectation for now.
+
         # Add training state tracking
         self.best_val_loss = float('inf')
         self.best_epoch = 0
@@ -325,25 +345,19 @@ class TFTModel:
     
     def _build_model(self):
         """Build the TFT model architecture."""
-        # Calculate input sizes based on column definitions
-        static_cols = [col for col, type_ in self.data_formatter.column_definition 
-                      if type_ == InputTypes.STATIC]
-        historical_cols = [col for col, type_ in self.data_formatter.column_definition
-                          if type_ in [InputTypes.TARGET, InputTypes.OBSERVED, InputTypes.KNOWN]]
-        future_cols = [col for col, type_ in self.data_formatter.column_definition
-                      if type_ == InputTypes.KNOWN]
-        
-        # Define inputs
-        # Static inputs
-        static_inputs = layers.Input(shape=(len(static_cols),),
+        # Define inputs based on architectural parameters
+        static_inputs = layers.Input(shape=(self.num_static_features,),
                                    name='static_inputs')
         
-        # Time-varying inputs
         historical_inputs = layers.Input(
-            shape=(self.num_encoder_steps, len(historical_cols)),
+            shape=(self.num_encoder_steps, self.num_historical_features),
             name='historical_inputs')
+        
+        # Future inputs: Keras can handle shape (None, N, 0) if the 0-dim feature is not used by any subsequent layer directly
+        # or if it's correctly handled by layers like concatenation (if it were non-zero).
+        # Given the previous error log `Future=(1, 5, 0)`, the model expects 0 features here.
         future_inputs = layers.Input(
-            shape=(self.num_steps, len(future_cols)),
+            shape=(self.num_steps, self.num_future_features), # self.num_future_features should be 0
             name='future_inputs')
         
         # Static context

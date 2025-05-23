@@ -21,6 +21,9 @@ class StockFormatter(GenericDataFormatter):
         self.config = config
         
         # Define column definitions
+        # Ensure only one static input for consistency with TFTModel num_static_features = 1
+        # If 'sector' or similar was intended as static, it should be the only one.
+        # Adding a placeholder 'static_id_placeholder' if no other clear static feature is present.
         self.column_definition = [
             ('symbol', InputTypes.ID),
             ('date', InputTypes.TIME),
@@ -31,7 +34,8 @@ class StockFormatter(GenericDataFormatter):
             ('volume', InputTypes.OBSERVED),
             ('returns', InputTypes.OBSERVED),
             ('volatility', InputTypes.OBSERVED),
-            ('sector', InputTypes.STATIC),
+            # ('sector', InputTypes.STATIC), # Example: if sector was the static feature
+            ('static_id_placeholder', InputTypes.STATIC), # Placeholder static feature
             ('market_cap', InputTypes.OBSERVED),
             ('pe_ratio', InputTypes.OBSERVED),
             ('dividend_yield', InputTypes.OBSERVED),
@@ -55,14 +59,24 @@ class StockFormatter(GenericDataFormatter):
             ('price_ema_20', InputTypes.OBSERVED),
             ('price_ema_50', InputTypes.OBSERVED),
             ('price_ema_200', InputTypes.OBSERVED),
-            ('market_regime', InputTypes.CATEGORICAL),
-            ('trading_signal', InputTypes.CATEGORICAL)
+            ('market_regime', InputTypes.CATEGORICAL), # This could also be InputTypes.KNOWN if regimes are forecasted
+            ('trading_signal', InputTypes.CATEGORICAL) # Same as above
         ]
         
         # Initialize scalers
         self.real_scalers: Dict[str, StandardScaler] = {}
         self.categorical_scalers: Dict[str, LabelEncoder] = {}
         
+    def is_future_known(self, column_name: str) -> bool:
+        """Checks if a column is a future-known input based on its definition."""
+        # For this formatter, assume KNOWN inputs are future known if they are not the target.
+        # A more sophisticated setup might have a separate flag or type.
+        for col, type_ in self.column_definition:
+            if col == column_name and type_ == InputTypes.KNOWN:
+                # Add any further logic here if some KNOWN are historical vs future
+                return True # Defaulting all KNOWN to be future for now if any were defined
+        return False
+
     def _get_input_columns(self) -> List[str]:
         """Returns names of all input columns."""
         return [col for col, type_ in self.column_definition if type_ != InputTypes.TARGET]
