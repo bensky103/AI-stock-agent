@@ -126,18 +126,55 @@ def test_get_market_data_single_symbol(mock_download, sample_config, sample_mark
 @patch('yfinance.download')
 def test_get_market_data_multiple_symbols(mock_download, sample_config, sample_market_data):
     """Test fetching market data for multiple symbols."""
-    # Create separate data for each symbol
+    # Simulate yf.download output for multiple symbols (MultiIndex columns)
     aapl_data = sample_market_data.copy()
     msft_data = sample_market_data.copy()
+
+    # yfinance typically returns columns like: Open, High, Low, Close, Adj Close, Volume
+    # We need to create a MultiIndex for columns: (Field, Symbol)
+    aapl_data_multi = pd.concat({'AAPL': aapl_data}, axis=1)
+    msft_data_multi = pd.concat({'MSFT': msft_data}, axis=1)
     
-    # Mock download to return different data for each symbol
-    def mock_download_side_effect(symbol, *args, **kwargs):
-        if symbol == 'AAPL':
-            return aapl_data
-        elif symbol == 'MSFT':
-            return msft_data
-        return pd.DataFrame()
+    # Combine them into a single DataFrame as yfinance would for multiple symbols
+    # The column levels would be ['Open', 'High', ..., 'Symbol']
+    # yfinance actually returns columns as [(Level0_value, Level1_value), ...]
+    # e.g. [ ('Adj Close', 'AAPL'), ('Adj Close', 'MSFT'), ('Close', 'AAPL'), ... ]
+    # The order of fields (Open, High, etc.) is usually grouped first, then symbols.
+    # Let's construct this structure.
     
+    # Get common columns (Open, High, etc.)
+    ohlc_cols = sample_market_data.columns.tolist()
+    
+    # Create DataFrames for each symbol, with original column names
+    aapl_for_concat = aapl_data.copy()
+    msft_for_concat = msft_data.copy()
+
+    # Concatenate them, resulting in columns like ('AAPL', 'Open'), ('MSFT', 'Open') if keys were on level 0
+    # yfinance.download(tickers=['AAPL', 'MSFT']) results in columns: MultiIndex
+    # Levels: ['Attributes', 'Symbols'] e.g. Attributes: Adj Close, Close, High, Low, Open, Volume
+    #                                     Symbols:    AAPL, MSFT
+    # So, ('Adj Close', 'AAPL'), ('Adj Close', 'MSFT'), ('Close', 'AAPL'), etc.
+
+    # Create the expected yfinance multi-symbol DataFrame structure
+    mock_return_df = pd.DataFrame(
+        index=sample_market_data.index, 
+        columns=pd.MultiIndex.from_product([ohlc_cols, ['AAPL', 'MSFT']], names=['Attributes', 'Symbols'])
+    )
+    
+    for col in ohlc_cols:
+        mock_return_df[(col, 'AAPL')] = aapl_for_concat[col]
+        mock_return_df[(col, 'MSFT')] = msft_for_concat[col]
+
+    # Ensure the mock returns this structured DataFrame when yf.download is called with a list
+    def mock_download_side_effect(symbols_arg, *args, **kwargs):
+        if isinstance(symbols_arg, list) and sorted(symbols_arg) == sorted(['AAPL', 'MSFT']):
+            return mock_return_df
+        elif symbols_arg == 'AAPL': # For other tests that might call with single symbol
+             return aapl_for_concat
+        elif symbols_arg == 'MSFT':
+             return msft_for_concat
+        return pd.DataFrame() # Default for other unexpected calls
+
     mock_download.side_effect = mock_download_side_effect
     
     df = get_market_data(
@@ -152,8 +189,12 @@ def test_get_market_data_multiple_symbols(mock_download, sample_config, sample_m
     assert not df.empty
     assert ('AAPL', pd.Timestamp('2024-01-02')) in df.index
     assert ('MSFT', pd.Timestamp('2024-01-02')) in df.index
-    assert ('close', 'AAPL') in df.columns
-    assert ('close', 'MSFT') in df.columns
+    # After processing by get_market_data, columns should be flat and lowercase
+    assert 'open' in df.columns 
+    assert 'adj_close' in df.columns
+    # And the data for each symbol should be present
+    assert not df.loc['AAPL'].empty
+    assert not df.loc['MSFT'].empty
 
 @patch('yfinance.download')
 def test_get_market_data_error_handling(mock_download, sample_config):
