@@ -459,11 +459,19 @@ class FeatureEngineer:
         # Stack sequences and ensure correct shape for TFT model
         features = np.array(sequences)
         
-        # If features has shape (1, seq_len, features), we need to reshape
-        # to ensure it's a batch of sequences
-        if features.shape[0] == 1 and features.ndim == 3:
-            return features.squeeze(0)  # Remove batch dimension if only one sample
+        # If we have a shape issue with dimensions, resolve it here
+        # Check if we have a 2D array with shape (n, 1) - this is the problematic case
+        # from the error message "Data must be 1-dimensional, got ndarray of shape (42, 1) instead"
+        if features.ndim == 3 and features.shape[0] == 1:
+            # Remove batch dimension for single sample
+            features = features.squeeze(0)
         
+        # Handle specific case where we have a 2D array with second dimension of 1
+        # This is the specific error we're seeing
+        if features.ndim == 2 and features.shape[1] == 1:
+            # Convert to 1D array
+            features = features.flatten()
+            
         return features
 
     def generate_features(self, df: pd.DataFrame) -> pd.DataFrame:
