@@ -419,146 +419,92 @@ class TFTPredictor:
             Tuple of (predictions, uncertainty)
         """
         logger.info(f"TFTPredictor.__call__ with input shape: {sequence_tensor.shape}")
-        
-        if hasattr(sequence_tensor, 'cpu'):
-            sequence_np = sequence_tensor.cpu().numpy()
+
+        # Ensure model is loaded
+        if self.model is None:
+            self.model = self._load_model()
+
+        # Convert to numpy if it's a PyTorch tensor
+        if hasattr(sequence_tensor, 'cpu') and hasattr(sequence_tensor, 'numpy'):
+            model_input_np = sequence_tensor.cpu().numpy()
+            logger.info(f"Converted to numpy with shape: {model_input_np.shape}")
+        elif isinstance(sequence_tensor, np.ndarray):
+            model_input_np = sequence_tensor
+            logger.info(f"Input is already numpy with shape: {model_input_np.shape}")
         else:
-            sequence_np = sequence_tensor
-            
-        logger.info(f"Converted to numpy with shape: {sequence_np.shape}")
+            raise TFTPredictorError(f"Unsupported input type for sequence_tensor: {type(sequence_tensor)}")
 
-        # Initial reshaping based on input dimensions
-        if sequence_np.ndim == 1: # Input is 1D (e.g. [features])
-            # Assume batch_size=1, seq_len=1 if only features are provided
-            # Or if it's a sequence of features for one sample, seq_len=len, features=1
-            # This part is ambiguous without knowing the exact model input structure
-            # For now, let's assume it's (seq_len) and needs to become (1, seq_len, 1)
-            logger.info(f"Reshaping 1D array {sequence_np.shape} to 3D (1, seq_len, 1)")
-            sequence_np = sequence_np.reshape(1, -1, 1) 
-        elif sequence_np.ndim == 2: # Input is 2D
-            if sequence_np.shape[1] == 1 and sequence_np.shape[0] != 1: # (seq_len, 1)
-                logger.info(f"Input is 2D {sequence_np.shape}, potentially (seq_len, 1). Flattening and reshaping to (1, seq_len, 1).")
-                sequence_np = sequence_np.flatten().reshape(1, -1, 1)
-            elif sequence_np.shape[0] == 1: # (1, features_or_seq_len)
-                logger.info(f"Input is 2D {sequence_np.shape}, potentially (1, N). Reshaping to (1, N, 1) or (1, 1, N).")
-                # This case is also ambiguous. If N is seq_len, num_features=1. If N is num_features, seq_len=1.
-                # Assuming (1, seq_len) and num_features = 1
-                sequence_np = sequence_np.reshape(1, -1, 1)
-            else: # (seq_len, features)
-                logger.info(f"Input is 2D {sequence_np.shape}, assuming (seq_len, features). Adding batch dimension.")
-                sequence_np = sequence_np.reshape(1, sequence_np.shape[0], sequence_np.shape[1])
-        elif sequence_np.ndim == 3: # Input is 3D (batch, seq_len, features)
-            logger.info(f"Input is already 3D: {sequence_np.shape}")
+        # Reshape if necessary (e.g. if it's 2D [seq_len, features] and model expects 3D [batch, seq_len, features])
+        if model_input_np.ndim == 2:
+            model_input_np = np.expand_dims(model_input_np, axis=0)
+            logger.info(f"Expanded to 3D with shape: {model_input_np.shape}")
+        elif model_input_np.ndim != 3:
+            raise TFTPredictorError(f"Input numpy array must be 2D or 3D, got {model_input_np.ndim}D with shape {model_input_np.shape}")
+        logger.info(f"Numpy array shape after initial processing: {model_input_np.shape}")
+
+        # The model.predict method expects a DataFrame for its internal _prepare_inputs_from_normalized logic
+        # We need to construct a DataFrame that TFTModel.predict can handle.
+        # This requires knowing the feature names the model was trained on or expects.
+        # This is a challenging part if feature names are not stored or passed correctly.
+
+        # Assuming model_input_np is (batch, seq_len, num_features)
+        # For now, we pass the numpy array directly, assuming TFTModel.predict can handle it
+        # or that it will be wrapped appropriately by TFTModel.predict or its helpers.
+        # The TFTModel.predict now uses _prepare_inputs_from_normalized which takes a DataFrame.
+        # We need to create this DataFrame.
+
+        num_features = model_input_np.shape[2]
+        # Try to get feature names from model_config or generate generic ones
+        feature_names = self.model_config.get("model_config", {}).get("input_feature_names", None)
+        if not feature_names or len(feature_names) != num_features:
+            logger.warning(f"Could not find explicit feature names in model_config.json. Generating generic feature names: feature_0 to feature_{num_features-1}. This is a fallback and might lead to errors if names don't match training.")
+            feature_names = [f"feature_{i}" for i in range(num_features)]
+
+        # We need to create a DataFrame for each item in the batch (currently batch_size=1 is assumed for prediction)
+        # The DataFrame should have `self.context_length` rows and `num_features` columns.
+        # The TFTModel.predict method and its helpers expect the DataFrame to have a specific structure,
+        # including a time index and a group identifier if the model was trained with them.
+        
+        # For simplicity in this __call__ method, which receives a raw sequence tensor,
+        # we'll make a DataFrame from the first (and only) item in the batch.
+        # This assumes self.context_length matches model_input_np.shape[1]
+        if model_input_np.shape[1] != self.context_length:
+            # This should not happen if data prep upstream uses correct sequence length from config
+            logger.error(f"CRITICAL: Input sequence length {model_input_np.shape[1]} does not match model context length {self.context_length}!")
+            # Fallback or raise error - for now, will likely cause issues in TFTModel.predict
+        
+        # Create a DataFrame from the first sequence in the batch
+        # This step matches how TFTModel.predict expects its input DataFrame based on its internal logic.
+        # This needs self.context_length (num_encoder_steps) and feature_names.
+        # The target column is also typically expected by the formatter inside TFTModel.predict.
+        # For prediction, the target column in the input df to TFTModel.predict is usually a placeholder.
+        
+        df_for_model = pd.DataFrame(model_input_np[0], columns=feature_names)
+        df_for_model['time_idx'] = np.arange(self.context_length)
+        df_for_model['symbol'] = 'DUMMY_GROUP_0' # Placeholder group ID
+        df_for_model['target'] = 0.0 # Placeholder target
+        
+        logger.info(f"[TFTPredictor] Constructed DataFrame for model prediction with shape: {df_for_model.shape}")
+        df_dtypes_str = df_for_model.dtypes.to_string()
+        logger.info(f"[TFTPredictor] Dtypes of constructed DataFrame:\n{df_dtypes_str}")
+
+        raw_predictions = self.model.predict(df_for_model) # TFTModel.predict method
+        # raw_predictions shape is (batch_size, self.context_length + self.prediction_horizon, 1)
+        # e.g. (1, 30 + 5, 1) = (1, 35, 1)
+        
+        # Extract the first future prediction step
+        # The future predictions start after self.context_length (num_encoder_steps)
+        if raw_predictions.shape[0] > 0 and raw_predictions.shape[1] > self.context_length:
+            prediction = raw_predictions[0, self.context_length, 0]
         else:
-            raise ValueError(f"Unexpected tensor ndim: {sequence_np.ndim} for shape {sequence_np.shape}")
-
-        logger.info(f"Numpy array shape after initial processing: {sequence_np.shape}")
+            logger.error(f"Raw predictions shape {raw_predictions.shape} is not as expected for extracting future prediction at index {self.context_length}.")
+            prediction = np.nan # Fallback to nan if shape is unexpected
         
-        batch_size, seq_len, n_features = sequence_np.shape
+        logger.info(f"Extracted prediction value: {prediction} from result shape {raw_predictions.shape}")
+
+        # For now, uncertainty is a placeholder
+        # TODO: Implement uncertainty extraction if model provides it
+        uncertainty = 0.01  # Placeholder
+        logger.info(f"Prediction: {prediction}, Uncertainty: {uncertainty}")
         
-        try:
-            # Ensure model config is loaded to get necessary column names etc.
-            if not hasattr(self, 'model_config') or not self.model_config:
-                self._load_config() # Loads self.model_config
-            if not hasattr(self, 'model') or self.model is None: # Ensure model is loaded to access hparams if needed by _load_config or here
-                self._load_model()
-
-            # Attempt to get column name configurations from self.model_config["model_config"]
-            m_config = self.model_config.get("model_config", {})
-            logger.info(f"[{self.__class__.__name__}] Loaded m_config from model_config.json. Keys: {list(m_config.keys()) if isinstance(m_config, dict) else 'm_config is not a dict'}")
-            if isinstance(m_config, dict):
-                logger.debug(f"[{self.__class__.__name__}] m_config content: {m_config}")
-            
-            expected_feature_names = m_config.get("time_varying_unknown_reals", 
-                                       m_config.get("input_obs_loc", 
-                                       m_config.get("input_feature_names", [])))
-            
-            if not expected_feature_names and n_features > 0:
-                logger.warning(
-                    f"Could not find explicit feature names in model_config.json. "
-                    f"Generating generic feature names: feature_0 to feature_{n_features-1}. "
-                    "This is a fallback and might lead to errors if names don't match training."
-                )
-                expected_feature_names = [f'feature_{k}' for k in range(n_features)]
-            
-            if len(expected_feature_names) != n_features:
-                raise TFTPredictorError(
-                    f"Mismatch between number of features in input sequence ({n_features}) "
-                    f"and expected feature names in model_config.json ({len(expected_feature_names)}: {expected_feature_names})."
-                )
-
-            gid_col_name = m_config.get("identifier_col_name", "symbol")
-            tid_col_name = m_config.get("time_idx_col_name", "time_idx")
-            
-            target_col_name_config = m_config.get("target_col_name", "target")
-            if isinstance(target_col_name_config, str):
-                target_names = [target_col_name_config]
-            elif isinstance(target_col_name_config, list):
-                target_names = target_col_name_config
-            else:
-                target_names = ["target"]
-
-            all_dfs_data_for_predict_call = []
-            for i in range(batch_size):
-                df_dict = {}
-                df_dict[tid_col_name] = np.arange(seq_len)
-                df_dict[gid_col_name] = [f'DUMMY_GROUP_{i}'] * seq_len
-                
-                for feature_idx, feature_name in enumerate(expected_feature_names):
-                    df_dict[feature_name] = sequence_np[i, :, feature_idx]
-                    
-                for target_name in target_names:
-                    if target_name not in df_dict:
-                        df_dict[target_name] = np.zeros(seq_len)
-
-                current_sequence_df = pd.DataFrame(df_dict)
-                all_dfs_data_for_predict_call.append(current_sequence_df)
-            
-            final_df_for_model = pd.concat(all_dfs_data_for_predict_call).reset_index(drop=True)
-
-            logger.info(f"[{self.__class__.__name__}] Constructed DataFrame for model prediction with shape: {final_df_for_model.shape}")
-            logger.info(f"[{self.__class__.__name__}] Dtypes of constructed DataFrame:\n{final_df_for_model.dtypes}")
-            logger.debug(f"[{self.__class__.__name__}] DataFrame head for model:\n{final_df_for_model.head()}")
-
-            # Load model if not already loaded (moved from self.predict to here)
-            if self.model is None:
-                self.model = self._load_model()
-
-            # Pass the fully constructed DataFrame representing the sequence(s)
-            # directly to the custom model's predict method.
-            result = self.model.predict(final_df_for_model)
-            
-            if isinstance(result, np.ndarray):
-                if result.ndim == 1:
-                    predictions_val = result[0]
-                elif result.ndim == 2:
-                    if result.shape[0] == batch_size:
-                         predictions_val = result[0, 0]
-                    else:
-                         predictions_val = result[0,0]
-                elif result.ndim == 3:
-                    predictions_val = result[0, 0, 0]
-                else:
-                    raise TFTPredictorError(f"Unexpected prediction result ndim: {result.ndim}, shape: {result.shape}")
-                logger.info(f"Extracted prediction value: {predictions_val} from result shape {result.shape}")
-            elif isinstance(result, dict) and 'predictions' in result :
-                predictions_val = result['predictions'][0,0]
-                logger.info(f"Extracted prediction value from dict result: {predictions_val}")
-            else:
-                raise TFTPredictorError(f"Prediction result from custom model is of unexpected type: {type(result)}. Expected numpy array or dict with 'predictions'.")
-
-            uncertainty_val = 0.01 # Placeholder
-
-            logger.info(f"Prediction: {predictions_val}, Uncertainty: {uncertainty_val}")
-            
-            import torch
-            predictions_tensor = torch.tensor([[predictions_val]], dtype=torch.float32)
-            uncertainty_tensor = torch.tensor([[uncertainty_val]], dtype=torch.float32)
-            
-            return predictions_tensor, uncertainty_tensor
-            
-        except Exception as e:
-            logger.error(f"Error in TFTPredictor call: {str(e)}")
-            logger.error(f"Input sequence_np shape: {sequence_np.shape if 'sequence_np' in locals() else 'not defined'}")
-            logger.error(f"Constructed final_df_for_model (sample):\n{final_df_for_model.head() if 'final_df_for_model' in locals() else 'not defined'}")
-            raise TFTPredictorError(f"Failed in TFTPredictor call: {str(e)}") 
+        return prediction, uncertainty 
