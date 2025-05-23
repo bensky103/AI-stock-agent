@@ -38,9 +38,9 @@ class StockPredictorError(Exception):
 
 # Configure logging
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)  # Set to DEBUG for more detailed logging
+logger.setLevel(logging.WARNING)  # Change back to WARNING from DEBUG
 _handler = logging.StreamHandler()
-_formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")  # Restore original format
 _handler.setFormatter(_formatter)
 logger.addHandler(_handler)
 
@@ -90,15 +90,6 @@ class EnhancedStockPredictor:
         self.default_model_dir = Path("colab_training/tft_model")
         self.saved_models_dir = Path("saved_models")
         self.saved_models_dir.mkdir(exist_ok=True)
-        
-        # Initialize logger
-        self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.WARNING)
-        if not self.logger.handlers:
-            handler = logging.StreamHandler()
-            formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-            handler.setFormatter(formatter)
-            self.logger.addHandler(handler)
         
         # Initialize components
         self.feature_engineer = FeatureEngineer(
@@ -174,163 +165,101 @@ class EnhancedStockPredictor:
         Returns:
             Dictionary of predictions for each symbol
         """
-        try:
-            logger.info("Starting prediction method...")
-            logger.info(f"Self.sequence_length = {self.sequence_length}")
-            
-            predictions = {}
-            
-            # Set default dates if not provided
-            if end_date is None:
-                end_date = datetime.now().strftime('%Y-%m-%d')
-            if start_date is None:
-                start_date = (datetime.strptime(end_date, '%Y-%m-%d') - 
-                            timedelta(days=self.sequence_length * 2)).strftime('%Y-%m-%d')
-            
-            # Get market data for all symbols
+        predictions = {}
+        
+        # Set default dates if not provided
+        if end_date is None:
+            end_date = datetime.now().strftime('%Y-%m-%d')
+        if start_date is None:
+            start_date = (datetime.strptime(end_date, '%Y-%m-%d') - 
+                         timedelta(days=self.sequence_length * 2)).strftime('%Y-%m-%d')
+        
+        # Get market data for all symbols
+        market_data = get_market_data(symbols, start_date, end_date)
+        if market_data.empty:
+            logger.error("No market data available for prediction")
+            raise ValueError("No market data available for prediction")
+        
+        # Process each symbol
+        for symbol in symbols:
             try:
-                logger.info(f"Getting market data for symbols: {symbols} from {start_date} to {end_date}")
-                market_data = get_market_data(symbols, start_date, end_date)
-                logger.info(f"Market data retrieved: {not market_data.empty}, columns: {market_data.columns.tolist() if not market_data.empty else 'N/A'}")
+                # Get symbol-specific data
+                symbol_data = market_data[market_data['Symbol'] == symbol].copy()
+                if symbol_data.empty:
+                    logger.warning(f"No data available for {symbol}")
+                    predictions[symbol] = {'error': 'No data available'}
+                    continue
                 
-                if market_data.empty:
-                    logger.error("No market data available for prediction")
-                    raise ValueError("No market data available for prediction")
-            except Exception as e:
-                logger.error(f"Error getting market data: {str(e)}")
-                import traceback
-                logger.error(f"Market data error traceback: {traceback.format_exc()}")
-                raise
-            
-            # Process each symbol
-            for symbol in symbols:
-                try:
-                    logger.info(f"Processing symbol: {symbol}")
-                    
-                    # Get symbol-specific data
-                    symbol_data = market_data[market_data['Symbol'] == symbol].copy()
-                    logger.info(f"Symbol data empty: {symbol_data.empty}, shape: {symbol_data.shape if not symbol_data.empty else 'N/A'}")
-                    
-                    if symbol_data.empty:
-                        logger.warning(f"No data available for {symbol}")
-                        predictions[symbol] = {'error': 'No data available'}
-                        continue
-                    
-                    logger.info(f"Got data for {symbol}, shape: {symbol_data.shape}")
-                    
-                    # Load model if not already loaded
-                    if symbol not in self.models:
-                        try:
-                            # Try to load from symbol-specific path first
-                            symbol_model_path = self.saved_models_dir / symbol
-                            default_model_path = self.default_model_dir
-                            
-                            logger.info(f"Checking for model paths: symbol-specific: {symbol_model_path} (exists: {symbol_model_path.exists()}), default: {default_model_path} (exists: {default_model_path.exists()})")
-                            
-                            if symbol_model_path.exists():
-                                logger.info(f"Loading model for {symbol} from {symbol_model_path}")
-                                self.load_model(symbol_model_path)
-                                self.models[symbol] = self.model
-                            else:
-                                # If no symbol-specific model, try the default model
-                                logger.info(f"Loading default model for {symbol} from {default_model_path}")
-                                self.load_model()  # This will use the default_model_dir
-                                self.models[symbol] = self.model
-                        except Exception as model_err:
-                            logger.error(f"Error loading model for {symbol}: {str(model_err)}")
-                            import traceback
-                            logger.error(f"Model loading error traceback: {traceback.format_exc()}")
-                            # Continue with feature preparation to diagnose issues
-                    
-                    # Prepare features
-                    logger.info(f"Preparing features for {symbol} using sequence_length={self.sequence_length}")
-                    logger.info(f"Feature engineer object: {self.feature_engineer}, has sequence_length attr: {hasattr(self.feature_engineer, 'sequence_length')}")
-                    if hasattr(self.feature_engineer, 'sequence_length'):
-                        logger.info(f"Feature engineer's sequence_length = {self.feature_engineer.sequence_length}")
-                    
+                # Load model if not already loaded
+                if symbol not in self.models:
                     try:
-                        features = self.feature_engineer.prepare_features(symbol_data)
-                        logger.info(f"Features prepared successfully: {features is not None}, shape: {features.shape if features is not None else 'None'}")
-                    except Exception as feature_err:
-                        logger.error(f"Error in prepare_features for {symbol}: {str(feature_err)}")
-                        import traceback
-                        logger.error(f"Feature preparation error traceback: {traceback.format_exc()}")
-                        raise
-                    
-                    if features is None or len(features) < self.sequence_length:
-                        logger.warning(f"Insufficient data for {symbol}: features is None: {features is None}, len(features): {len(features) if features is not None else 'N/A'}, sequence_length: {self.sequence_length}")
-                        predictions[symbol] = {'error': 'Insufficient data for prediction'}
-                        continue
-                    
-                    # Check if model was successfully loaded
-                    logger.info(f"Symbol in models dict: {symbol in self.models}, model is None: {self.models.get(symbol) is None if symbol in self.models else 'N/A'}")
-                    
-                    if symbol in self.models and self.models[symbol] is not None:
-                        try:
-                            # Get the last sequence for prediction
-                            logger.info(f"Extracting last sequence for prediction, sequence_length={self.sequence_length}")
-                            last_sequence = features[-self.sequence_length:]
-                            logger.info(f"Last sequence shape: {last_sequence.shape}")
-                            last_sequence = torch.FloatTensor(last_sequence).unsqueeze(0).to(self.device)
-                            logger.info(f"Converted to tensor, shape: {last_sequence.shape}")
-                            
-                            # Make prediction
-                            logger.info(f"Making prediction with model")
-                            with torch.no_grad():
-                                model = self.models[symbol]
-                                pred, uncertainty = model(last_sequence)
-                                pred = pred.cpu().numpy()[0][0]
-                                uncertainty = uncertainty.cpu().numpy()[0][0] if uncertainty is not None else None
-                            
-                            logger.info(f"Prediction successful: {pred}, uncertainty: {uncertainty}")
-                            
-                            # Store prediction
-                            predictions[symbol] = {
-                                'prediction': float(pred),
-                                'uncertainty': float(uncertainty) if uncertainty is not None else None,
-                                'last_date': symbol_data.index[-1].strftime('%Y-%m-%d') if hasattr(symbol_data.index[-1], 'strftime') else str(symbol_data.index[-1]),
-                                'last_price': float(symbol_data['Close'].iloc[-1]) if 'Close' in symbol_data.columns else None,
-                                'prediction_date': end_date
-                            }
-                            
-                            logger.info(f"Made prediction for {symbol}: {pred:.2f} ± {uncertainty:.2f if uncertainty else 'N/A'}")
-                        except Exception as pred_err:
-                            logger.error(f"Error during prediction for {symbol}: {str(pred_err)}")
-                            import traceback
-                            logger.error(f"Prediction error traceback: {traceback.format_exc()}")
-                            raise
-                    else:
-                        # No model available
-                        logger.info(f"No model available for {symbol}, returning placeholder result")
-                        predictions[symbol] = {
-                            'prediction': None,
-                            'uncertainty': None,
-                            'last_date': symbol_data.index[-1].strftime('%Y-%m-%d') if hasattr(symbol_data.index[-1], 'strftime') else str(symbol_data.index[-1]),
-                            'last_price': float(symbol_data['Close'].iloc[-1]) if 'Close' in symbol_data.columns else None,
-                            'prediction_date': end_date,
-                            'status': 'No model available - check pre-trained models in colab_training/tft_model',
-                            'features_shape': str(features.shape) if features is not None else 'None'
-                        }
+                        # Try to load from symbol-specific path first
+                        symbol_model_path = self.saved_models_dir / symbol
+                        if symbol_model_path.exists():
+                            logger.info(f"Loading model for {symbol} from {symbol_model_path}")
+                            self.load_model(symbol_model_path)
+                            self.models[symbol] = self.model
+                        else:
+                            # If no symbol-specific model, try the default model
+                            logger.info(f"Loading default model for {symbol}")
+                            self.load_model()  # This will use the default_model_dir
+                            self.models[symbol] = self.model
+                    except Exception as model_err:
+                        logger.error(f"Error loading model for {symbol}: {str(model_err)}")
+                        # Continue with feature preparation to diagnose issues
                 
-                except Exception as e:
-                    logger.error(f"Error processing {symbol}: {str(e)}")
-                    import traceback
-                    logger.error(f"Symbol processing error traceback: {traceback.format_exc()}")
+                # Prepare features
+                features = self.feature_engineer.prepare_features(symbol_data)
+                if features is None or len(features) < self.sequence_length:
+                    logger.warning(f"Insufficient data for {symbol}")
+                    predictions[symbol] = {'error': 'Insufficient data for prediction'}
+                    continue
+                
+                # Check if model was successfully loaded
+                if symbol in self.models and self.models[symbol] is not None:
+                    # Get the last sequence for prediction
+                    last_sequence = features[-self.sequence_length:]
+                    last_sequence = torch.FloatTensor(last_sequence).unsqueeze(0).to(self.device)
+                    
+                    # Make prediction
+                    with torch.no_grad():
+                        model = self.models[symbol]
+                        pred, uncertainty = model(last_sequence)
+                        pred = pred.cpu().numpy()[0][0]
+                        uncertainty = uncertainty.cpu().numpy()[0][0] if uncertainty is not None else None
+                    
+                    # Store prediction
                     predictions[symbol] = {
-                        'error': str(e),
-                        'last_date': None,
-                        'last_price': None,
+                        'prediction': float(pred),
+                        'uncertainty': float(uncertainty) if uncertainty is not None else None,
+                        'last_date': symbol_data.index[-1].strftime('%Y-%m-%d') if hasattr(symbol_data.index[-1], 'strftime') else str(symbol_data.index[-1]),
+                        'last_price': float(symbol_data['Close'].iloc[-1]) if 'Close' in symbol_data.columns else None,
                         'prediction_date': end_date
                     }
+                    
+                    logger.info(f"Made prediction for {symbol}: {pred:.2f} ± {uncertainty:.2f if uncertainty else 'N/A'}")
+                else:
+                    # No model available
+                    predictions[symbol] = {
+                        'prediction': None,
+                        'uncertainty': None,
+                        'last_date': symbol_data.index[-1].strftime('%Y-%m-%d') if hasattr(symbol_data.index[-1], 'strftime') else str(symbol_data.index[-1]),
+                        'last_price': float(symbol_data['Close'].iloc[-1]) if 'Close' in symbol_data.columns else None,
+                        'prediction_date': end_date,
+                        'status': 'No model available - check pre-trained models in colab_training/tft_model',
+                        'features_shape': str(features.shape) if features is not None else 'None'
+                    }
             
-            logger.info(f"Prediction complete, returning {len(predictions)} results")
-            return predictions
-            
-        except Exception as e:
-            logger.error(f"Unhandled error in predict method: {str(e)}")
-            import traceback
-            logger.error(f"Main predict method error traceback: {traceback.format_exc()}")
-            raise
+            except Exception as e:
+                logger.error(f"Error processing {symbol}: {str(e)}")
+                predictions[symbol] = {
+                    'error': str(e),
+                    'last_date': None,
+                    'last_price': None,
+                    'prediction_date': end_date
+                }
+        
+        return predictions
 
     def train(
         self,

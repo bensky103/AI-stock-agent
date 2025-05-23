@@ -52,12 +52,12 @@ sentiment:
 
 # Model Configuration
 model:
-  lstm:
-    sequence_length: 10
-    hidden_size: 64
-    num_layers: 2
-    dropout: 0.2
-    bidirectional: true
+  type: 'tft'  # Changed from lstm to tft
+  sequence_length: 10  # Moved up one level for direct access
+  hidden_size: 64
+  num_layers: 2
+  dropout: 0.2
+  prediction_horizon: 5  # Added for TFT model
   training:
     batch_size: 32
     learning_rate: 0.001
@@ -95,11 +95,14 @@ trading_rules:
     max_portfolio_risk: 0.02
     position_sizing_method: kelly
 
-# Risk Management
-risk_management:
+# Risk Management Configuration
+risk_management_settings:
   max_portfolio_risk: 0.02
   max_drawdown: 0.15
   max_correlation: 0.7
+  max_open_positions: 5    # Maximum number of concurrent positions
+  max_sector_exposure: 0.3  # Maximum exposure to a single sector
+  max_symbol_exposure: 0.2  # Maximum exposure to a single symbol  
   diversification:
     min_positions: 3
     max_sector_exposure: 0.3
@@ -108,9 +111,10 @@ risk_management:
     enabled: true
     lookback_period: 20
     target_volatility: 0.15
+    regime_based: true  # Adjust based on market regime
 
 # Execution Settings
-execution:
+execution_settings:
   mode: paper_trading  # paper_trading or live_trading
   broker: alpaca
   order_types:
@@ -121,9 +125,16 @@ execution:
   default_slippage: 0.001
   retry_attempts: 3
   retry_delay: 1
+  slippage_model: proportional  # Options: fixed, proportional
+  slippage_pct: 0.001          # Slippage percentage
+  commission_model: per_share   # Options: fixed, per_share, percentage
+  commission_rate: 0.001       # Commission rate
+  min_trade_size: 100          # Minimum trade size in shares
+  max_trade_size: 10000        # Maximum trade size in shares
+  time_in_force: GTC           # Good Till Cancelled
 
 # Monitoring Configuration
-monitoring:
+monitoring_settings:
   metrics:
     - accuracy
     - returns
@@ -131,6 +142,10 @@ monitoring:
     - max_drawdown
     - win_rate
     - profit_factor
+    - sortino_ratio
+    - calmar_ratio
+    - alpha
+    - beta
   alerts:
     email:
       enabled: true
@@ -140,6 +155,10 @@ monitoring:
       enabled: false
       bot_token: ""
       chat_id: ""
+    drawdown_threshold: 0.05
+    position_limit_threshold: 0.9
+    volatility_threshold: 0.3
+    regime_change_threshold: 0.5
   logging:
     level: WARNING
     file: logs/trading_system.log
@@ -147,11 +166,12 @@ monitoring:
     backup_count: 5
 
 # Backtesting Configuration
-backtesting:
+backtesting_settings:
   start_date: 2023-01-01
   end_date: 2024-01-31
   initial_capital: 100000
   transaction_cost: 0.001
+  performance_benchmark: SPY  # Benchmark for performance comparison
   scenarios:
     - name: bull_market
       start_date: 2023-01-01
@@ -162,16 +182,12 @@ backtesting:
     - name: volatile_market
       start_date: 2024-01-01
       end_date: 2024-01-31
-  metrics:
-    - total_return
-    - sharpe_ratio
-    - sortino_ratio
-    - max_drawdown
-    - win_rate
-    - profit_factor
-    - calmar_ratio
-    - alpha
-    - beta
+    - name: normal
+      volatility_multiplier: 1.0
+    - name: high_volatility
+      volatility_multiplier: 1.5
+    - name: low_volatility
+      volatility_multiplier: 0.7
 
 # Trading Strategy Configuration
 
@@ -213,15 +229,6 @@ position_management:
     GOOGL: 1
     AMZN: 1
     TSLA: 1
-
-# Risk Management
-risk_management:
-  max_open_positions: 5    # Maximum number of concurrent positions
-  max_sector_exposure: 0.3  # Maximum exposure to a single sector
-  max_symbol_exposure: 0.2  # Maximum exposure to a single symbol
-  volatility_adjustment: true  # Adjust position sizes based on volatility
-  regime_based_adjustment: true  # Adjust based on market regime
-  correlation_threshold: 0.7  # Maximum allowed correlation between positions
 
 # Market Regime Detection
 market_regime:
@@ -267,45 +274,3 @@ portfolio_optimization:
     max_position_size: 0.2
     min_sector_weight: 0.1
     max_sector_weight: 0.3
-
-# Execution Settings
-execution:
-  slippage_model: proportional  # Options: fixed, proportional
-  slippage_pct: 0.001          # Slippage percentage
-  commission_model: per_share   # Options: fixed, per_share, percentage
-  commission_rate: 0.001       # Commission rate
-  min_trade_size: 100          # Minimum trade size in shares
-  max_trade_size: 10000        # Maximum trade size in shares
-  time_in_force: GTC           # Good Till Cancelled
-
-# Monitoring and Logging
-monitoring:
-  log_level: INFO
-  performance_metrics:
-    - sharpe_ratio
-    - sortino_ratio
-    - max_drawdown
-    - win_rate
-    - profit_factor
-  alerts:
-    drawdown_threshold: 0.05
-    position_limit_threshold: 0.9
-    volatility_threshold: 0.3
-    regime_change_threshold: 0.5
-
-# Backtesting Configuration
-backtesting:
-  start_date: 2023-01-01
-  end_date: 2024-01-01
-  initial_capital: 100000
-  scenarios:
-    - name: normal
-      volatility_multiplier: 1.0
-    - name: high_volatility
-      volatility_multiplier: 1.5
-    - name: low_volatility
-      volatility_multiplier: 0.7
-  transaction_costs:
-    commission: 0.001
-    slippage: 0.001
-  performance_benchmark: SPY  # Benchmark for performance comparison

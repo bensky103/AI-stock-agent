@@ -111,17 +111,18 @@ def main():
     
     # 3. Initialize predictor
     try:
-        logger.info("Initializing stock predictor")
+        # Access sequence_length and prediction_horizon directly from model config
+        sequence_length = config['model']['sequence_length']
+        prediction_horizon = config['model']['prediction_horizon']
+        
         predictor = EnhancedStockPredictor(
             model_type='tft',  # Using TFT as it's the only supported model type
-            sequence_length=config['model']['sequence_length'],
-            prediction_horizon=config['model']['prediction_horizon']
+            sequence_length=sequence_length,
+            prediction_horizon=prediction_horizon
         )
-        logger.info(f"Predictor initialized with sequence_length={config['model']['sequence_length']}, prediction_horizon={config['model']['prediction_horizon']}")
         
         # Get symbol from config
         symbol = config['market_data']['symbols'][0] if isinstance(config['market_data']['symbols'], list) else config['market_data']['symbols']
-        logger.info(f"Using symbol: {symbol}")
         
         # Set date range for prediction
         end_date = datetime.now(pytz.UTC) - timedelta(days=1)
@@ -130,41 +131,22 @@ def main():
         # Convert to string format
         end_date_str = end_date.strftime('%Y-%m-%d')
         start_date_str = start_date.strftime('%Y-%m-%d')
-        logger.info(f"Date range: {start_date_str} to {end_date_str}")
         
         # Skip training since it's not implemented and directly make predictions
         logger.info("Making predictions...")
-        try:
-            predictions = predictor.predict(
-                symbols=[symbol],
-                start_date=start_date_str,
-                end_date=end_date_str
-            )
-            
-            # Save predictions
-            save_predictions(predictions, config['output']['predictions_path'])
-            logger.info("Prediction process complete")
-            
-        except Exception as predict_err:
-            logger.error(f"Error in prediction call: {str(predict_err)}")
-            import traceback
-            logger.error(f"Prediction error traceback: {traceback.format_exc()}")
-            raise
+        predictions = predictor.predict(
+            symbols=[symbol],
+            start_date=start_date_str,
+            end_date=end_date_str
+        )
+        
+        # Save predictions
+        save_predictions(predictions, config['output']['predictions_path'])
+        logger.info("Prediction process complete")
     
     except Exception as e:
         logger.error(f"Error in prediction process: {e}")
-        import traceback
-        logger.error(f"Full traceback: {traceback.format_exc()}")
-        
-        # Debug key attributes that might be causing issues
-        if 'predictor' in locals():
-            logger.error(f"Predictor attributes:")
-            logger.error(f"  sequence_length: {getattr(predictor, 'sequence_length', 'Not found')}")
-            logger.error(f"  feature_engineer: {getattr(predictor, 'feature_engineer', 'Not found')}")
-            if hasattr(predictor, 'feature_engineer') and predictor.feature_engineer is not None:
-                logger.error(f"  feature_engineer.sequence_length: {getattr(predictor.feature_engineer, 'sequence_length', 'Not found')}")
-        else:
-            logger.error("Predictor not initialized successfully")
+        raise
 
 if __name__ == "__main__":
     logger.info("Starting stock prediction system")
