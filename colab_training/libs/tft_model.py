@@ -655,98 +655,130 @@ class TFTModel:
         }
     
     def _prepare_inputs_from_normalized(self, df_normalized: pd.DataFrame) -> tuple:
-        """Helper function to prepare model inputs from normalized data."""
-        # This assumes df_normalized is already processed (e.g., with correct time_idx)
-        # and only needs to be split into the various input types for the model.
-        logger_grn = logging.getLogger(__name__) # Use a consistent logger
+        """Helper function to prepare model inputs from normalized data.
+        Ensures that three arrays (static, historical, future) are returned, matching model's expected input structure.
+        """
+        logger_grn = logging.getLogger(__name__) 
 
         if df_normalized.empty:
             raise ValueError("Input DataFrame for _prepare_inputs_from_normalized is empty.")
 
-        # Attempt to get input column configurations
-        config_known_regular = self.config.get('known_regular_inputs', [])
-        config_known_categorical = self.config.get('known_categorical_inputs', [])
-        config_obs_loc = self.config.get('input_obs_loc', [])
-        config_static_loc = self.config.get('static_input_loc', [])
+        # Get expected shapes from the Keras model
+        # input_shape is a list for multi-input models: [(batch, static_feats), (batch, hist_len, hist_feats), (batch, fut_len, fut_feats)]
+        # For prediction, batch is often 1 or handled by predict method. We care about feature dimensions and sequence lengths.
+        try:
+            static_input_shape_keras = self.model.input_shape[0]
+            historical_input_shape_keras = self.model.input_shape[1]
+            future_input_shape_keras = self.model.input_shape[2]
+        except IndexError as e:
+            logger_grn.error(f"[{self.__class__.__name__}] Could not get model input shapes. Model expects {len(self.model.input_shape)} inputs. Error: {e}")
+            raise ValueError("Failed to determine Keras model input shapes.") from e
 
-        # Fallback: If no specific input configurations are found,
-        # assume all 'feature_X' columns are observed inputs.
-        if not any([config_known_regular, config_known_categorical, config_obs_loc, config_static_loc]):
+        num_static_features_keras = static_input_shape_keras[-1]
+        hist_seq_len_keras = historical_input_shape_keras[-2] # self.num_encoder_steps
+        num_hist_features_keras = historical_input_shape_keras[-1]
+        future_seq_len_keras = future_input_shape_keras[-2] # self.num_steps
+        num_future_features_keras = future_input_shape_keras[-1]
+
+        # Attempt to get input column configurations from self.config
+        config_static_loc = self.config.get('static_input_loc', [])
+        config_input_obs_loc = self.config.get('input_obs_loc', [])
+        config_known_regular_inputs = self.config.get('known_regular_inputs', []) # Can be hist or fut
+        # config_known_categorical_inputs = self.config.get('known_categorical_inputs', []) # Also hist or fut
+
+        # Fallback for observed inputs if primary configs are missing
+        feature_cols_for_hist_fallback = []
+        if not config_input_obs_loc and not config_known_regular_inputs: # Simplified condition for brevity
             feature_cols_in_df = [col for col in df_normalized.columns if col.startswith('feature_')]
             if feature_cols_in_df:
                 logger_grn.warning(
-                    f"[{self.__class__.__name__}] Config missing input specs or columns not found in df. "
-                    f"Defaulting to use all 'feature_X' columns as 'input_obs_loc': {feature_cols_in_df}"
+                    f"[{self.__class__.__name__}] Config missing 'input_obs_loc' or 'known_regular_inputs'. "
+                    f"Defaulting to use all 'feature_X' columns as potential historical inputs: {feature_cols_in_df}"
                 )
-                config_obs_loc = feature_cols_in_df # Use all feature_X columns as observed
+                # These feature_cols will be attempted for historical_input_array
+                feature_cols_for_hist_fallback = feature_cols_in_df
             else:
                 logger_grn.warning(
-                    f"[{self.__class__.__name__}] Config missing input specs and no 'feature_X' columns found in df_normalized. "
-                    "Cannot prepare model inputs."
+                    f"[{self.__class__.__name__}] Config missing input specs and no 'feature_X' columns found."
                 )
         
-        known_regular_inputs_data = []
-        for name in config_known_regular:
-            if name in df_normalized.columns:
-                known_regular_inputs_data.append(df_normalized[name].values)
-            else:
-                logger_grn.debug(f"[{self.__class__.__name__}] Known regular input '{name}' not found in df_normalized columns.")
+        # 1. Prepare Static Inputs
+        static_data_values = []
+        if config_static_loc:
+            for name in config_static_loc:
+                if name in df_normalized.columns:
+                    # Static inputs are typically single values per entity, take first row
+                    static_data_values.append(df_normalized[name].iloc[0]) 
+                else:
+                    logger_grn.debug(f"Static input '{name}' not in df_normalized.")
+        
+        if static_data_values and len(static_data_values) == num_static_features_keras:
+            prepared_static_input = np.array(static_data_values).astype(np.float32)
+        else:
+            if config_static_loc: # Log if we had a config but it didn't match
+                 logger_grn.warning(f"Static input from config did not match Keras shape ({len(static_data_values)} vs {num_static_features_keras}). Using zeros.")
+            prepared_static_input = np.zeros((num_static_features_keras,), dtype=np.float32)
 
+        # 2. Prepare Historical Inputs
+        # Use feature_cols_for_hist_fallback if primary config_input_obs_loc is empty
+        # This logic needs to be more robust to differentiate KNOWN inputs for historical vs future part.
+        # For now, if feature_cols_for_hist_fallback is populated, assume they are all for historical.
+        hist_input_candidate_cols = config_input_obs_loc + [c for c in config_known_regular_inputs if c in df_normalized.columns] # crude merge
+        if not hist_input_candidate_cols and feature_cols_for_hist_fallback:
+            hist_input_candidate_cols = feature_cols_for_hist_fallback
 
-        known_categorical_inputs_data = []
-        for name in config_known_categorical:
-            if name in df_normalized.columns:
-                known_categorical_inputs_data.append(df_normalized[name].values)
-            else:
-                logger_grn.debug(f"[{self.__class__.__name__}] Known categorical input '{name}' not found in df_normalized columns.")
+        historical_data_stacked = None
+        if hist_input_candidate_cols:
+            temp_hist_data = []
+            for name in hist_input_candidate_cols:
+                if name in df_normalized.columns:
+                    temp_hist_data.append(df_normalized[name].values) # Should be (hist_seq_len_keras,)
+                else:
+                    logger_grn.debug(f"Historical candidate input '{name}' not in df_normalized.")
+            
+            if temp_hist_data and len(temp_hist_data) == num_hist_features_keras:
+                try:
+                    # Each item in temp_hist_data is (L,). Stack to (L, H)
+                    historical_data_stacked = np.stack(temp_hist_data, axis=-1).astype(np.float32)
+                    if historical_data_stacked.shape[0] != hist_seq_len_keras:
+                        logger_grn.warning(f"Historical data seq length mismatch ({historical_data_stacked.shape[0]} vs {hist_seq_len_keras}). Reshaping/padding needed or config error.")
+                        # This might require padding or truncation if seq len doesn't match df_normalized rows
+                        # For now, we will let it pass to see next error if shapes are incompatible downstream
+                except ValueError as e:
+                    logger_grn.error(f"Error stacking historical data: {e}. Columns: {hist_input_candidate_cols}, NumFeaturesKeras: {num_hist_features_keras}")
+                    historical_data_stacked = None # Failed to stack to correct feature dimension
 
+        if historical_data_stacked is not None and historical_data_stacked.shape == (hist_seq_len_keras, num_hist_features_keras):
+            prepared_historical_input = historical_data_stacked
+        else:
+            if hist_input_candidate_cols: # Log if we had candidates but they didn't match
+                 logger_grn.warning(f"Historical input from config/fallback did not match Keras shape. Using zeros. Provided data shape if any: {historical_data_stacked.shape if historical_data_stacked is not None else 'None'}, Keras expects: {(hist_seq_len_keras, num_hist_features_keras)}")
+            prepared_historical_input = np.zeros((hist_seq_len_keras, num_hist_features_keras), dtype=np.float32)
 
-        obs_inputs_data = []
-        for name in config_obs_loc:
-            if name in df_normalized.columns:
-                obs_inputs_data.append(df_normalized[name].values)
-            else:
-                logger_grn.debug(f"[{self.__class__.__name__}] Observed input '{name}' ('input_obs_loc') not found in df_normalized columns.")
-                
-
-        static_inputs_data = []
-        for name in config_static_loc:
-            if name in df_normalized.columns:
-                static_inputs_data.append(df_normalized[name].iloc[[0]].values) # Static inputs are typically single values per entity
-            else:
-                logger_grn.debug(f"[{self.__class__.__name__}] Static input '{name}' ('static_input_loc') not found in df_normalized columns.")
-
-
-        model_inputs = []
-        if known_regular_inputs_data:
-            # Stack along the last axis to create a (num_samples, num_timesteps_or_rows, num_features) array
-            stacked_known_regular = np.stack(known_regular_inputs_data, axis=-1)
-            model_inputs.append(stacked_known_regular)
-        if known_categorical_inputs_data:
-            stacked_known_categorical = np.stack(known_categorical_inputs_data, axis=-1)
-            model_inputs.append(stacked_known_categorical)
-        if obs_inputs_data:
-            stacked_obs = np.stack(obs_inputs_data, axis=-1)
-            model_inputs.append(stacked_obs)
-        if static_inputs_data:
-            # Static inputs are often 2D (batch_size, num_static_features)
-            # .iloc[[0]] and then stacking them might need careful handling depending on Keras model structure
-            # For now, assuming stacking along last axis is okay, or they are already correctly shaped.
-            stacked_statics = np.stack([s.flatten() for s in static_inputs_data], axis=-1)
-            model_inputs.append(stacked_statics)
-
-        if not model_inputs:
-            logger_grn.error(f"[{self.__class__.__name__}] After attempting to process inputs, model_inputs list is still empty.")
-            logger_grn.error(f"Config values were: known_regular={config_known_regular}, known_categorical={config_known_categorical}, obs_loc={config_obs_loc}, static_loc={config_static_loc}")
-            logger_grn.error(f"Dataframe columns: {df_normalized.columns.tolist()}")
-            raise ValueError("No model inputs could be prepared based on config or fallback.")
-
-        for i, arr in enumerate(model_inputs):
-            if not isinstance(arr, np.ndarray):
-                raise TypeError(f"Model input at index {i} is not a numpy array, got {type(arr)}")
-            logger_grn.debug(f"[{self.__class__.__name__}] Prepared Keras input {i} shape: {arr.shape}")
-
-        return tuple(model_inputs)
+        # 3. Prepare Future Inputs
+        # This part is tricky as df_normalized usually contains historical data.
+        # True future inputs usually come from a different source or are generated.
+        # For now, assume if not specified in config to map from df_normalized, use zeros.
+        # A more complete solution would parse config_known_regular_inputs for future-specific keys.
+        future_data_values = []
+        # Example: if self.config.get('known_future_inputs', []) had column names from df_normalized
+        # for name in self.config.get('known_future_inputs', []):
+        #     if name in df_normalized.columns:
+        #           # This would need careful slicing for future timesteps if df_normalized contained them
+        #           future_data_values.append(df_normalized[name].values[:future_seq_len_keras]) 
+        
+        # Assuming no specific future inputs from df_normalized for now if not configured.
+        if future_data_values and len(future_data_values) == num_future_features_keras:
+            # This would need stacking and ensuring shape (future_seq_len_keras, num_future_features_keras)
+            # prepared_future_input = np.stack(future_data_values, axis=-1).astype(np.float32)
+            # Placeholder, as current logic won't populate future_data_values this way
+            logger_grn.warning("Future input from config path is complex and not fully implemented for df_normalized. Using zeros for future inputs.")
+            prepared_future_input = np.zeros((future_seq_len_keras, num_future_features_keras), dtype=np.float32)
+        else:
+            prepared_future_input = np.zeros((future_seq_len_keras, num_future_features_keras), dtype=np.float32)
+        
+        logger_grn.info(f"Prepared Keras inputs shapes: Static={prepared_static_input.shape}, Historical={prepared_historical_input.shape}, Future={prepared_future_input.shape}")
+        return prepared_static_input, prepared_historical_input, prepared_future_input
 
     def evaluate(self, test_df: pd.DataFrame) -> Dict:
         """Evaluate model performance on test data."""
