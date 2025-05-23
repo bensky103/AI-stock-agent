@@ -24,6 +24,8 @@ node_modules/
 #Debug files
 pytest.txt
 
+logs
+logs/market_feed.log
 logs/
 gpush.sh
 gpull.sh

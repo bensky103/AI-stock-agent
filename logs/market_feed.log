@@ -1,0 +1,7 @@
+2025-05-23 11:12:01,132 - data_input.market_feed - ERROR - Error fetching data for TSLA: isna is not defined for MultiIndex
+2025-05-23 11:12:01,132 - __main__ - ERROR - Error in prediction process: Error fetching data for TSLA: isna is not defined for MultiIndex
+2025-05-23 11:12:52,274 - yfinance - ERROR - $TSLA: possibly delisted; no price data found  (1d 2024-05-22 08:12:51.621226+00:00 -> 2025-05-22 08:12:51.621226+00:00)
+2025-05-23 11:12:52,274 - data_input.market_feed - WARNING - No data found for TSLA between 2024-05-22 08:12:51.621226+00:00 and 2025-05-22 08:12:51.621226+00:00
+2025-05-23 11:12:52,275 - data_input.market_feed - ERROR - Error fetching data: No data fetched for any symbols
+2025-05-23 11:12:52,275 - __main__ - ERROR - Error fetching market data: Error fetching data: No data fetched for any symbols
+2025-05-23 11:12:52,276 - __main__ - ERROR - No market data available. Exiting.
