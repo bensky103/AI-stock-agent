@@ -728,10 +728,10 @@ class TFTModel:
             df_normalized = df
         else:
             try:
-                df_normalized = self.data_formatter.transform(df)
-                pred_logger.info(f"[{self.__class__.__name__}] df_normalized shape after formatter.transform: {df_normalized.shape}")
+                df_normalized = self.data_formatter.transform_inputs(df)
+                pred_logger.info(f"[{self.__class__.__name__}] df_normalized shape after formatter.transform_inputs: {df_normalized.shape}")
             except Exception as e:
-                pred_logger.error(f"[{self.__class__.__name__}] Error during data_formatter.transform: {e}. Check if formatter was fitted.")
+                pred_logger.error(f"[{self.__class__.__name__}] Error during data_formatter.transform_inputs: {e}. Check if formatter was fitted.")
                 raise
 
         try:
