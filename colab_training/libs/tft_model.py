@@ -776,7 +776,7 @@ class TFTModel:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         
         # Save model weights - Keras now requires .weights.h5 suffix
-        self.model.save_weights(f"{path}.weights.h5")
+        self.model.save_weights(os.path.join(path, "model.weights.h5"))
         
         # Save model config and training state
         config = {
@@ -786,7 +786,7 @@ class TFTModel:
             'training_history': self.training_history
         }
         
-        with open(f"{path}_config.json", 'w') as f:
+        with open(os.path.join(path, "model_config.json"), 'w') as f:
             json.dump(config, f)
             
     def load(self, path: str):
@@ -796,10 +796,34 @@ class TFTModel:
             path: Path to load model from
         """
         # Load model weights - updated for new Keras format
-        self.model.load_weights(f"{path}.weights.h5")
+        weights_file_path = os.path.join(path, "model.weights.h5")
+        if not os.path.exists(weights_file_path):
+            # Fallback to best_model.weights.h5 if model.weights.h5 doesn't exist
+            weights_file_path = os.path.join(path, "best_model.weights.h5")
+            if not os.path.exists(weights_file_path):
+                raise FileNotFoundError(f"Neither model.weights.h5 nor best_model.weights.h5 found in {path}")
+        self.model.load_weights(weights_file_path)
         
         # Load config and training state
-        with open(f"{path}_config.json", 'r') as f:
+        config_file_path = os.path.join(path, "model_config.json") # Assuming config is named model_config.json
+        # Attempt to locate a more general config if the specific one isn't found.
+        if not os.path.exists(config_file_path):
+            potential_configs = ["model_config.json", "params.json", "hyperparameters.json"]
+            for potential_config in potential_configs:
+                _config_file_path = os.path.join(path, potential_config)
+                if os.path.exists(_config_file_path):
+                    config_file_path = _config_file_path
+                    break
+            if not os.path.exists(config_file_path): # if still not found
+                 # Try to find any .json file in the directory as a last resort for config
+                json_files_in_dir = [f for f in os.listdir(path) if f.endswith('.json')]
+                if json_files_in_dir:
+                    config_file_path = os.path.join(path, json_files_in_dir[0]) # pick the first one
+                else:
+                    # If no JSON config file is found after all attempts, raise an error.
+                    raise FileNotFoundError(f"No suitable .json config file found in {path}. Tried model_config.json, {', '.join(potential_configs)}, and any other .json file.")
+
+        with open(config_file_path, 'r') as f:
             config = json.load(f)
             
         self.best_val_loss = config['best_val_loss']
