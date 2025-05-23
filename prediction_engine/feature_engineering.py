@@ -328,7 +328,15 @@ class FeatureEngineer:
         # Exclude known non-feature columns if they are somehow numeric and present
         # This is a safeguard; ideally, df passed here is purely features + target.
         potential_non_features = ['time_idx', 'group_id', 'identifier', 'date', 'symbol'] # Add any other known ID/time cols
-        feature_cols = [col for col in feature_cols if col.lower() not in potential_non_features]
+        
+        # Handle cases where column names might be tuples (e.g., from MultiIndex)
+        filtered_feature_cols = []
+        for col in feature_cols:
+            # Convert column to string for comparison; join if tuple, else convert to string
+            col_str = '_'.join(map(str, col)) if isinstance(col, tuple) else str(col)
+            if col_str.lower() not in potential_non_features:
+                filtered_feature_cols.append(col) # Keep original column identifier
+        feature_cols = filtered_feature_cols
 
         if not feature_cols:
             logger.warning("No feature columns identified for normalization.")
