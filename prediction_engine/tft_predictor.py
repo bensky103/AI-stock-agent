@@ -318,4 +318,77 @@ class TFTPredictor:
         except Exception as e:
             if not isinstance(e, TFTPredictorError):
                 raise TFTPredictorError(f"Error predicting next steps: {str(e)}")
-            raise 
+            raise
+    
+    def get_attention_weights(self, inputs) -> np.ndarray:
+        """Get attention weights for interpretability."""
+        # Not implemented in this version
+        raise NotImplementedError("Attention weights visualization is not implemented")
+        
+    def __call__(self, sequence_tensor):
+        """Handle PyTorch tensor inputs for prediction.
+        
+        Args:
+            sequence_tensor: PyTorch tensor of shape [batch_size, sequence_length, features]
+            
+        Returns:
+            Tuple of (predictions, uncertainty)
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"TFTPredictor.__call__ with input shape: {sequence_tensor.shape}")
+        
+        # Convert PyTorch tensor to numpy
+        if hasattr(sequence_tensor, 'cpu'):
+            sequence_np = sequence_tensor.cpu().numpy()
+        else:
+            sequence_np = sequence_tensor
+            
+        logger.info(f"Converted to numpy with shape: {sequence_np.shape}")
+        
+        # Check input shape
+        if len(sequence_np.shape) != 3:
+            logger.error(f"Expected 3D tensor with shape [batch_size, seq_len, features], got {sequence_np.shape}")
+            raise ValueError(f"Expected 3D tensor with shape [batch_size, seq_len, features], got {sequence_np.shape}")
+        
+        batch_size, seq_len, n_features = sequence_np.shape
+        
+        # Extract features - we need to create a proper dataframe for TFT
+        try:
+            # Create a dummy dataframe for the TFT model
+            df = pd.DataFrame()
+            
+            # Add required columns
+            df['symbol'] = ['DUMMY'] * batch_size
+            df['datetime'] = [pd.Timestamp.now()] * batch_size
+            df['open'] = sequence_np[0, -1, 0]  # Use last timestep value
+            df['high'] = sequence_np[0, -1, 0] * 1.01  # Approximate
+            df['low'] = sequence_np[0, -1, 0] * 0.99  # Approximate
+            df['close'] = sequence_np[0, -1, 0]  # Use last timestep value
+            df['volume'] = [1000] * batch_size  # Dummy value
+            
+            # Set index
+            df.set_index(['symbol', 'datetime'], inplace=True)
+            
+            # Make prediction
+            logger.info("Calling model.predict")
+            result = self.predict(df)
+            
+            # Extract prediction
+            predictions = result['predictions'][0][0]  # Assuming first prediction
+            
+            # For now, we'll use a fixed uncertainty for simplicity
+            uncertainty = np.array([0.01])  # 1% uncertainty
+            
+            logger.info(f"Prediction: {predictions}, Uncertainty: {uncertainty}")
+            
+            # Return in the format expected by the predictor
+            import torch
+            predictions_tensor = torch.tensor([[predictions]], dtype=torch.float32)
+            uncertainty_tensor = torch.tensor([[uncertainty[0]]], dtype=torch.float32)
+            
+            return predictions_tensor, uncertainty_tensor
+            
+        except Exception as e:
+            logger.error(f"Error in __call__: {str(e)}")
+            raise TFTPredictorError(f"Failed to make prediction: {str(e)}") 

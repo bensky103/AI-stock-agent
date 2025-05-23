@@ -263,10 +263,31 @@ class EnhancedStockPredictor:
                         with torch.no_grad():
                             model = self.models[symbol]
                             self.logger.info(f"Model type: {type(model).__name__}")
-                            pred, uncertainty = model(last_sequence)
-                            self.logger.info(f"Prediction successful, shape: {pred.shape}")
-                            pred = pred.cpu().numpy()[0][0]
-                            uncertainty = uncertainty.cpu().numpy()[0][0] if uncertainty is not None else None
+                            try:
+                                pred, uncertainty = model(last_sequence)
+                                self.logger.info(f"Prediction successful, shape: {pred.shape}")
+                                pred = pred.cpu().numpy()[0][0]
+                                uncertainty = uncertainty.cpu().numpy()[0][0] if uncertainty is not None else None
+                            except ValueError as ve:
+                                if "Data must be 1-dimensional" in str(ve):
+                                    self.logger.error(f"Dimensionality error: {str(ve)}")
+                                    self.logger.error(f"Last sequence shape: {last_sequence.shape}")
+                                    self.logger.error(f"Last sequence type: {type(last_sequence)}")
+                                    
+                                    # Try to fix the dimensionality issue
+                                    if len(last_sequence.shape) == 3 and last_sequence.shape[2] == 1:
+                                        self.logger.info("Attempting to fix dimensionality by squeezing last dim")
+                                        fixed_sequence = last_sequence.squeeze(-1)
+                                        self.logger.info(f"Fixed shape: {fixed_sequence.shape}")
+                                        pred, uncertainty = model(fixed_sequence)
+                                        self.logger.info(f"Prediction successful with fix, shape: {pred.shape}")
+                                        pred = pred.cpu().numpy()[0][0]
+                                        uncertainty = uncertainty.cpu().numpy()[0][0] if uncertainty is not None else None
+                                    else:
+                                        raise
+                                else:
+                                    raise
+                                    
                     except Exception as model_error:
                         self.logger.error(f"Error during model prediction: {str(model_error)}")
                         self.logger.error(f"Error type: {type(model_error).__name__}")
