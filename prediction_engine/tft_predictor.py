@@ -380,39 +380,72 @@ class TFTPredictor:
             for i in range(batch_size):
                 # For each item in the batch, construct the features for the DataFrame
                 # The original TFT model expects multiple features and known/unknown inputs.
-                # This part is a **significant simplification** and likely needs to match
-                # the exact preprocessing used during the model training.
                 
                 # We take the *last* time step of the sequence to form the input for prediction.
                 current_features = sequence_np[i, -1, :] # Shape: (n_features,)
 
                 # Ensure current_features is 1D for DataFrame construction if n_features is 1
-                if n_features == 1:
-                    current_features = current_features.flatten() # Should be (1,) -> scalar for single feature assignment
+                if n_features == 1 and current_features.ndim > 1: 
+                    current_features = current_features.flatten()
                 
-                # Construct a dictionary for the DataFrame row
                 # These column names MUST match what the TFT model was trained on.
-                # The error "Data must be 1-dimensional" often happens if a column here
-                # is expected as (N,) but is provided as (N,1).
+                # The model's hparams should contain the list of these feature names.
+                # Typically stored in self.model.hparams.time_varying_unknown_reals
+                expected_feature_names = self.model.hparams.get("time_varying_unknown_reals", [])
+                
+                if not expected_feature_names:
+                    # This fallback is risky and assumes a certain number of features if names are not in hparams.
+                    # It's better if hparams always contain the feature names.
+                    logger.warning(
+                        "Feature names ('time_varying_unknown_reals') not found in model hparams. "
+                        "Attempting to proceed with assumed feature names based on n_features. "
+                        "This may lead to errors if the assumption is incorrect."
+                    )
+                    # Placeholder: generate generic names if specific ones aren't found.
+                    # This part might need adjustment based on how features were named during training.
+                    if n_features > 0 :
+                        expected_feature_names = [f'feature_{k}' for k in range(n_features)]
+                        # A common case is that the first feature is 'close' or the target variable.
+                        # If your model was trained with 'close' as the first unknown real, for example:
+                        # expected_feature_names[0] = 'close' # Or whatever the actual target/main feature is.
+                        logger.warning(f"Using generic feature names: {expected_feature_names}")
+                    else: # n_features is 0
+                         raise TFTPredictorError("Cannot proceed with 0 features and no feature names in hparams.")
+
+
+                if len(expected_feature_names) != n_features:
+                    # This error can also occur if the data fed to prepare_features resulted in an unexpected number of feature columns.
+                    raise TFTPredictorError(
+                        f"Mismatch between number of expected (time_varying_unknown_reals) features ({len(expected_feature_names)}) "
+                        f"and actual features provided in sequence ({n_features}). Expected names: {expected_feature_names}. "
+                        "Check data preprocessing and feature engineering steps."
+                    )
+
                 row = {
-                    'symbol': f'DUMMY_{i}',
-                    'datetime': pd.Timestamp.now() - timedelta(days=batch_size - 1 - i),
-                    # Assuming the features in sequence_np correspond to these in order:
-                    # This is a placeholder. The actual mapping is crucial.
-                    'open': current_features[0] if n_features > 0 else 100.0,
-                    'high': current_features[0] * 1.01 if n_features > 0 else 101.0, # Approximation
-                    'low': current_features[0] * 0.99 if n_features > 0 else 99.0,   # Approximation
-                    'close': current_features[0] if n_features > 0 else 100.0,
-                    'volume': 1000 # Dummy volume
-                    # Add other known_future_inputs, static_inputs etc. as required by your model
-                    # For example, if 'day_of_week' was a feature:
-                    # 'day_of_week': (pd.Timestamp.now() - timedelta(days=batch_size - 1 - i)).dayofweek
+                    # Standard columns required by PyTorch Forecasting
+                    # The actual group ID column name might be different, check training TimeSeriesDataSet.
+                    self.model.hparams.get("group_ids", ["symbol"])[0]: f'DUMMY_{i}', 
+                    # The actual time index column name might be different.
+                    self.model.hparams.get("time_idx", "time_idx"): pd.Timestamp.now().timestamp(), # Needs to be a numerical time index
+                    # Add any static categorical or real features if model expects them for DUMMY_{i}
+                    # Add any time-varying known features if model expects them
                 }
-                # If more features are present in sequence_np, they need to be mapped to named columns
-                # Example: if n_features > 1, assign them to other expected columns
-                if n_features > 1:
-                     row['feature_1'] = current_features[1] # Ensure this column name is correct
-                # ... and so on for all features expected by the model
+                
+                # Populate the time-varying unknown features
+                for idx, feature_name in enumerate(expected_feature_names):
+                    row[feature_name] = current_features[idx]
+                
+                # PyTorch Forecasting also needs a 'target' column for prediction, often set to a dummy value like 0
+                # The actual target column name(s) are in self.model.hparams.target
+                # If it's a multi-target model, all target names must be present.
+                if isinstance(self.model.hparams.target, str):
+                    targets = [self.model.hparams.target]
+                else:
+                    targets = self.model.hparams.target
+                
+                for target_name in targets:
+                    if target_name not in row: # Avoid overwriting if it's also a feature
+                         row[target_name] = 0.0 # Dummy value for prediction input
 
                 df_data.append(row)
 
@@ -446,5 +479,8 @@ class TFTPredictor:
             return predictions_tensor, uncertainty_tensor
             
         except Exception as e:
-            logger.error(f"Error in __call__ while creating DataFrame or predicting: {str(e)}", exc_info=True)
-            raise TFTPredictorError(f"Failed to make prediction: {str(e)}") 
+            logger.error(f"Error in TFTPredictor call: {str(e)}")
+            # It's often helpful to log the state that led to the error
+            logger.error(f"Input sequence_np shape: {sequence_np.shape if 'sequence_np' in locals() else 'not defined'}")
+            logger.error(f"Constructed df_data: {df_data if 'df_data' in locals() else 'not defined'}")
+            raise TFTPredictorError(f"Failed in TFTPredictor call: {str(e)}") 
