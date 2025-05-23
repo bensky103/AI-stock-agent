@@ -312,10 +312,6 @@ class TFTModel:
         
         # Core architectural parameters for input shapes - aligned with FeatureEngineer
         self.num_encoder_steps = config.get('num_encoder_steps', 10) # Historical sequence length (from FeatureEngineer)
-        if self.num_encoder_steps != 10:
-            logger.warning(f"[{self.__class__.__name__}] Overriding num_encoder_steps from config ({self.num_encoder_steps}) to 10 for alignment.")
-            self.num_encoder_steps = 10
-
         self.num_steps = config.get('num_steps', 5) # Future sequence length (prediction horizon)
 
         # Explicit feature counts based on FeatureEngineer output and typical TFT structure
