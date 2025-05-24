@@ -740,8 +740,22 @@ class FeatureEngineer:
             data_subset_for_seq.ffill(inplace=True)
             data_subset_for_seq.bfill(inplace=True)
             if data_subset_for_seq.isnull().values.any():
-                logger.error(f"===== FeatureEngineer: Data for sequencing for symbol '{symbol}' still has NaNs after fill. Cannot create sequences reliably. Columns with NaNs: {data_subset_for_seq.columns[data_subset_for_seq.isnull().any()].tolist()} =====")
-                return None
+                # Check for columns that are still entirely NaN
+                all_nan_cols_in_subset = data_subset_for_seq.columns[data_subset_for_seq.isnull().all()].tolist()
+                if all_nan_cols_in_subset:
+                    logger.warning(f"===== FeatureEngineer: Columns {all_nan_cols_in_subset} are entirely NaN in data for sequencing for symbol '{symbol}' AFTER fill. Dropping them. =====")
+                    data_subset_for_seq = data_subset_for_seq.drop(columns=all_nan_cols_in_subset)
+                    # Update features_for_sequencing list to reflect dropped columns
+                    features_for_sequencing = [f for f in features_for_sequencing if f not in all_nan_cols_in_subset]
+                    if data_subset_for_seq.empty or not features_for_sequencing:
+                         logger.error(f"===== FeatureEngineer: Data for sequencing became empty or no features left for symbol '{symbol}' after dropping all-NaN columns. Cannot create sequences. =====")
+                         return None
+                
+                # Re-check for any remaining NaNs (e.g., partial NaNs that couldn't be filled)
+                if data_subset_for_seq.isnull().values.any():
+                    remaining_nan_cols = data_subset_for_seq.columns[data_subset_for_seq.isnull().any()].tolist()
+                    logger.error(f"===== FeatureEngineer: Data for sequencing for symbol '{symbol}' still has NaNs after fill and dropping all-NaN columns (cols: {remaining_nan_cols}). Cannot create sequences reliably. =====")
+                    return None
 
         sequences_np = self.sequence_preprocessor.create_sequences(data_subset_for_seq.values) # Pass NumPy array
         
