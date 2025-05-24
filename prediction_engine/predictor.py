@@ -313,8 +313,8 @@ class EnhancedStockPredictor:
 
                 # Make prediction
                 try:
-                    self.logger.info(f"[{self.__class__.__name__}] Passing the prepared input tensor to the underlying model ({type(model_to_use).__name__}) for {symbol} to get forecasts...")
                     model_to_use = self._get_or_load_model(symbol)
+                    self.logger.info(f"[{self.__class__.__name__}] Passing the prepared input tensor to the underlying model ({type(model_to_use).__name__ if model_to_use is not None else 'N/A'}) for {symbol} to get forecasts...")
                     
                     if model_to_use is None:
                         self.logger.error(f"[{self.__class__.__name__}] No model found for {symbol} or default via _get_or_load_model. Skipping.")
