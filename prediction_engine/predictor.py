@@ -177,12 +177,12 @@ class EnhancedStockPredictor:
                 # Using a recent period that should cover self.sequence_length
                 # The actual length of data needed will be sequence_length for feature prep.
                 fetch_end_date = datetime.now(pytz.utc)
-                fetch_start_date = fetch_end_date - timedelta(days=60) # Fetch more to be safe, e.g. 60 days
+                fetch_start_date_predict = fetch_end_date - timedelta(days=60) # Default for prediction input
                 
                 self.logger.info(f"[{self.__class__.__name__}] Fetching latest raw market data for {symbol} to build the prediction input sequence...")
                 latest_data_df = get_market_data(
                     [symbol],
-                    start_date=fetch_start_date.strftime('%Y-%m-%d'),
+                    start_date=fetch_start_date_predict.strftime('%Y-%m-%d'),
                     end_date=fetch_end_date.strftime('%Y-%m-%d')
                 )
                 
@@ -225,14 +225,32 @@ class EnhancedStockPredictor:
 
                 # Check if scaler is fitted. If not, fit it using the historical data available for this symbol.
                 if not self.feature_engineer.is_scaler_fitted(symbol=symbol):
-                    self.logger.info(f"[{self.__class__.__name__}] Data scaler for {symbol} (or global) not fitted. Attempting to fit it now using the latest fetched data.")
+                    self.logger.info(f"[{self.__class__.__name__}] Data scaler for {symbol} (or global) not fitted. Attempting to fit it now using a larger historical dataset.")
                     
+                    # Fetch a larger dataset for scaler fitting
+                    fetch_start_date_scaler_fit = fetch_end_date - timedelta(days=365 * 2) # Approx 2 years for robust scaler fitting
+                    self.logger.info(f"[{self.__class__.__name__}] Fetching extended historical data for {symbol} for scaler fitting: {fetch_start_date_scaler_fit.strftime('%Y-%m-%d')} to {fetch_end_date.strftime('%Y-%m-%d')}")
+                    historical_data_for_scaler = get_market_data(
+                        [symbol],
+                        start_date=fetch_start_date_scaler_fit.strftime('%Y-%m-%d'),
+                        end_date=fetch_end_date.strftime('%Y-%m-%d')
+                    )
+
+                    if isinstance(historical_data_for_scaler.index, pd.MultiIndex):
+                        historical_data_for_scaler = historical_data_for_scaler.xs(symbol, level=0)
+
+                    if historical_data_for_scaler.empty or historical_data_for_scaler.shape[0] < self.feature_engineer.sequence_length: # Basic check
+                        self.logger.error(f"[{self.__class__.__name__}] Insufficient historical data fetched for scaler fitting for {symbol} (shape: {historical_data_for_scaler.shape}). Cannot fit scaler.")
+                        predictions[symbol] = {"error": "Insufficient data for scaler fitting."}
+                        continue
+
+                    self.logger.info(f"[{self.__class__.__name__}] Shape of historical_data_for_scaler for {symbol} (for fitting): {historical_data_for_scaler.shape}")
+
                     # 1. Calculate TAs on data intended for scaler fitting.
-                    # Pass symbol and fit_scalers=True so calculate_technical_indicators knows this context.
                     df_with_ta_for_fitting, _ = self.feature_engineer.calculate_technical_indicators(
-                        latest_data_df.copy(), 
+                        historical_data_for_scaler.copy(), 
                         symbol=symbol, 
-                        fit_scalers=True # This allows dropping NaNs which is fine for fitting scalers
+                        fit_scalers=True 
                     )
                     
                     # 2. Fit the scaler if TA calculation was successful and produced data.
