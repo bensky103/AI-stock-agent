@@ -187,7 +187,6 @@ class FeatureEngineer:
         self.feature_stds = None
         self.selected_features = None
         self.pca_components = None
-        self.target_scaler_params = None # To store params for 'close' column
         
         logger.info(
             f"Initialized feature engineer with {len(self.technical_indicators)} "
