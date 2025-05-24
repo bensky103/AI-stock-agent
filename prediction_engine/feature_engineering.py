@@ -626,7 +626,7 @@ class FeatureEngineer:
                     self.global_target_scaler_params = target_params
                     logger.info(f"===== FeatureEngineer: Stored global specific scaling parameters for target column '{self.target_column_name}': Center(mean)={target_mean:.2f}, Scale(std)={target_scale:.2f} =====")
             else:
-                logger.warning(f"===== FeatureEngineer: Target column '{self.target_column_name}' not found in columns to scale: {cols_to_scale}. Cannot store its specific scaling parameters. Available numeric features: {df[cols_to_scale].columns.tolist()} =====")
+                logger.warning(f"===== FeatureEngineer: Target column '{self.target_column_name}' not found in columns to scale: {cols_to_scale}. Cannot store its specific scaling parameters. Available numeric features: {data[cols_to_scale].columns.tolist()} =====")
 
         except ValueError as e:
             logger.error(f"===== FeatureEngineer: ValueError during scaler fitting for symbol '{symbol if symbol else 'global'}': {e}. This might happen if data contains all NaNs or is not numeric. Input shape: {data[cols_to_scale].shape} =====")
