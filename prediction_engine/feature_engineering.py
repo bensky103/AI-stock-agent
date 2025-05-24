@@ -643,21 +643,18 @@ class FeatureEngineer:
             return np.array([])
 
         features_np_all_timesteps = final_feature_df.values
-        logger.info(f"[FeatureEngineer] Converted features to NumPy array of shape {features_np_all_timesteps.shape} (all_timesteps, num_features). Ready for sequence stacking.")
+        logger.info(f"[FeatureEngineer] Converted features to NumPy array of shape {features_np_all_timesteps.shape} (all_timesteps, num_features). Ready for sequence extraction.")
 
-        # Stack into sequences
-        # This will return sequences of shape (num_sequences, sequence_length, num_features)
-        # or (sequence_length, num_features) if only one full sequence can be formed.
-        stacked_sequences = self.sequence_preprocessor.stack_sequences(features_np_all_timesteps)
+        # For prediction, we need the last sequence of `self.sequence_length`
+        if len(features_np_all_timesteps) >= self.sequence_length:
+            # Take the last `sequence_length` rows to form the final input sequence
+            final_sequence_for_prediction = features_np_all_timesteps[-self.sequence_length:]
+            logger.info(f"[FeatureEngineer] Extracted the last sequence of length {self.sequence_length}. Final prediction input sequence shape: {final_sequence_for_prediction.shape}.")
+        else:
+            logger.warning(f"[FeatureEngineer] Not enough data ({len(features_np_all_timesteps)} timesteps) to form a complete sequence of length {self.sequence_length}. Returning an empty array.")
+            return np.array([])
         
-        if stacked_sequences.size == 0:
-            logger.warning(f"[FeatureEngineer] Sequence stacking resulted in an empty array. Input shape was {features_np_all_timesteps.shape}, sequence length {self.sequence_length}. Not enough data for a full sequence.")
-            return np.array([]) # Return empty if no sequences could be formed
-        
-        logger.info(f"[FeatureEngineer] Features stacked into sequences. Final output shape: {stacked_sequences.shape}. This is the model-ready input.")
-        # The output shape could be (num_sequences, sequence_length, num_features) or (sequence_length, num_features)
-        # depending on SequencePreprocessor.stack_sequences logic if only one sequence is produced.
-        return stacked_sequences
+        return final_sequence_for_prediction
 
     def generate_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Generate features from market data.
