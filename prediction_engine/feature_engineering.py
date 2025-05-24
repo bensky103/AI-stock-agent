@@ -13,13 +13,14 @@ import pytz
 from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.decomposition import PCA
 from sklearn.feature_selection import SelectKBest, f_regression
-import ta as ta_lib # Renaming to avoid conflict if pandas_ta is also aliased to ta
-import pandas_ta as ta # For df.ta accessor
+import ta
 import traceback # For logging exception tracebacks
+
+# Explicitly import from ta submodules to match original usage patterns
 from ta.trend import SMAIndicator, EMAIndicator, MACD, ADXIndicator
-from ta.momentum import RSIIndicator, StochasticOscillator
+from ta.momentum import RSIIndicator, StochasticOscillator # Assuming StochasticOscillator might be used
 from ta.volatility import BollingerBands, AverageTrueRange
-from ta.volume import VolumeWeightedAveragePrice, MFIIndicator
+from ta.volume import VolumeWeightedAveragePrice, MFIIndicator # Assuming these might be used
 from .sequence_preprocessor import SequencePreprocessor
 
 # Configure logging
@@ -49,42 +50,39 @@ class MarketRegimeDetector:
         # ADX calculation with data length check
         adx_window = 14  # Default window for ADXIndicator
         min_periods_adx = (2 * adx_window) - 1
-        adx = pd.Series(np.nan, index=df.index, name='adx') # Initialize with NaNs
+        adx_series = pd.Series(np.nan, index=df.index, name='adx') # Initialize with NaNs
 
         if len(df) >= min_periods_adx:
             try:
-                adx_indicator = ADXIndicator(
+                adx_indicator_obj = ADXIndicator(
                     high=df['high'], 
                     low=df['low'], 
                     close=df['close'], 
                     window=adx_window, 
                     fillna=True
                 )
-                adx = adx_indicator.adx()
+                adx_series = adx_indicator_obj.adx()
             except IndexError as ie:
                 logger.warning(
                     f"[MarketRegimeDetector] IndexError calculating ADX({adx_window}) with {len(df)} rows (min {min_periods_adx}): {ie}. "
                     f"ADX will contain NaNs."
                 )
-                # adx is already initialized with NaNs
             except Exception as e:
                 logger.error(
                     f"[MarketRegimeDetector] Unexpected error calculating ADX({adx_window}) with {len(df)} rows: {e}. "
                     f"ADX will contain NaNs."
                 )
-                # adx is already initialized with NaNs
         else:
             logger.warning(
                 f"[MarketRegimeDetector] Insufficient data ({len(df)} rows) for ADX({adx_window}). Need {min_periods_adx}. "
                 f"ADX will contain NaNs."
             )
-            # adx is already initialized with NaNs
         
         # Calculate momentum indicators
         rsi = RSIIndicator(close=df['close']).rsi()
-        macd = MACD(close=df['close'])
-        macd_line = macd.macd()
-        signal_line = macd.macd_signal()
+        macd_obj = MACD(close=df['close'])
+        macd_line = macd_obj.macd()
+        signal_line = macd_obj.macd_signal()
         
         # Calculate volatility
         bb = BollingerBands(close=df['close'])
@@ -96,19 +94,25 @@ class MarketRegimeDetector:
         # Trend-based rules
         regime[df['close'] > sma_20] += 1
         regime[df['close'] > sma_50] += 1
-        regime[adx > 25] += 1  # Strong trend
+        if not adx_series.empty: # Check if adx_series was populated
+             regime[adx_series > 25] += 1  # Strong trend
         
         # Momentum-based rules
         regime[rsi > 60] += 1
         regime[rsi < 40] -= 1
-        regime[macd_line > signal_line] += 1
-        regime[macd_line < signal_line] -= 1
+        if not macd_line.empty and not signal_line.empty: # Check if MACD lines were populated
+            regime[macd_line > signal_line] += 1
+            regime[macd_line < signal_line] -= 1
         
         # Volatility-based rules
-        regime[bb_width > bb_width.rolling(window=self.window).mean()] -= 1  # High volatility
+        if not bb_width.empty: # Check if bb_width was populated
+            regime[bb_width > bb_width.rolling(window=self.window).mean()] -= 1  # High volatility
         
         # Normalize to [-1, 1]
-        regime = regime / regime.abs().max()
+        if not regime.empty and regime.abs().max() != 0:
+            regime = regime / regime.abs().max()
+        else:
+            regime = pd.Series(0, index=df.index) # Default to neutral if max is 0 or empty
         
         # Apply smoothing
         regime = regime.rolling(window=self.window).mean()
@@ -262,37 +266,32 @@ class FeatureEngineer:
             logger.error(f"===== FeatureEngineer: Missing required columns for TA calculation: {missing_cols}. Available columns: {df.columns.tolist()} =====")
             return None, None
 
-        # Ensure no NaN in core OHLCV before TA-Lib, fill with a safe method if minor
         for col in required_cols:
             if df[col].isnull().any():
                 nan_count = df[col].isnull().sum()
                 logger.warning(f"===== FeatureEngineer: Column '{col}' has {nan_count} NaN values before TA calculation. Attempting ffill. Data shape: {df.shape} =====")
-                df[col] = df[col].ffill() # Forward fill might be acceptable for minor gaps
-                if df[col].isnull().any(): # If still NaNs (e.g., at the beginning)
+                df[col] = df[col].ffill()
+                if df[col].isnull().any():
                     logger.error(f"===== FeatureEngineer: Column '{col}' still has NaNs after ffill. Cannot proceed with TA calculation. =====")
                     return None, None
 
         try:
-            df.ta.strategy("Momentum")
-            df.ta.strategy("Volatility")
-            df.ta.strategy("Trend")
-            df.ta.strategy("Volume")
-            logger.info(f"===== FeatureEngineer: Basic TA strategies (Momentum, Volatility, Trend, Volume) applied. Shape after: {df.shape} =====")
+            # Add custom indicators directly using their classes from ta library
+            df['sma_50'] = SMAIndicator(close=df['close'], window=50).sma_indicator()
+            df['ema_20'] = EMAIndicator(close=df['close'], window=20).ema_indicator()
+            df['rsi_14'] = RSIIndicator(close=df['close'], window=14).rsi()
             
-            # Add custom indicators if desired
-            df['sma_50'] = ta.sma(df['close'], length=50)
-            df['ema_20'] = ta.ema(df['close'], length=20)
-            df['rsi_14'] = ta.rsi(df['close'], length=14)
-            df['bbands_upper'], df['bbands_middle'], df['bbands_lower'] = \
-                ta.bbands(df['close'], length=20, std=2).iloc[:,0], \
-                ta.bbands(df['close'], length=20, std=2).iloc[:,1], \
-                ta.bbands(df['close'], length=20, std=2).iloc[:,2]
-            df['macd_line'], df['macd_signal'], df['macd_hist'] = \
-                ta.macd(df['close'], fast=12, slow=26, signal=9).iloc[:,0], \
-                ta.macd(df['close'], fast=12, slow=26, signal=9).iloc[:,1], \
-                ta.macd(df['close'], fast=12, slow=26, signal=9).iloc[:,2]
-            df['atr_14'] = ta.atr(df['high'], df['low'], df['close'], length=14)
-            # Add more indicators as needed based on configuration or feature importance
+            bbands_indicator = BollingerBands(close=df['close'], window=20, window_dev=2)
+            df['bbands_upper'] = bbands_indicator.bollinger_hband()
+            df['bbands_middle'] = bbands_indicator.bollinger_mavg()
+            df['bbands_lower'] = bbands_indicator.bollinger_lband()
+            
+            macd_indicator = MACD(close=df['close'], window_fast=12, window_slow=26, window_sign=9)
+            df['macd_line'] = macd_indicator.macd()
+            df['macd_signal'] = macd_indicator.macd_signal()
+            df['macd_hist'] = macd_indicator.macd_diff()
+            
+            df['atr_14'] = AverageTrueRange(high=df['high'], low=df['low'], close=df['close'], window=14).average_true_range()
 
             logger.info(f"===== FeatureEngineer: Additional custom TAs (SMA, EMA, RSI, BBands, MACD, ATR) applied. Shape after: {df.shape} =====")
 
@@ -322,7 +321,7 @@ class FeatureEngineer:
                 # Drop original market_regime and intermediate columns if not needed
                 df.drop(columns=['log_return', 'volatility_20d', 'market_regime'], inplace=True, errors='ignore')
                 logger.info("===== FeatureEngineer: Market regime detection complete. Added one-hot encoded regime features. Shape after: {df.shape} =====")
-            except Exception as e:
+            except Exception as e: 
                 logger.error(f"===== FeatureEngineer: Error during market regime detection: {e}. Proceeding without regime features. =====")
                 logger.error(traceback.format_exc())
 
@@ -414,7 +413,7 @@ class FeatureEngineer:
             if symbol:
                 self.scalers[symbol] = scaler
                 logger.info(f"===== FeatureEngineer: Scaler for symbol '{symbol}' has been fitted and stored. =====")
-            else:
+        else:
                 self.global_scaler = scaler
                 logger.info("===== FeatureEngineer: Global scaler has been fitted and stored. =====")
 

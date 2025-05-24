@@ -266,7 +266,7 @@ class EnhancedStockPredictor:
                     self.logger.warning(f"[{self.__class__.__name__}] Feature preparation for {symbol} (prepare_features_for_prediction) returned empty or invalid result. Shape: {prediction_input_sequence_np.shape if isinstance(prediction_input_sequence_np, np.ndarray) else 'N/A'}. Skipping prediction.")
                     predictions[symbol] = {"error": "Feature preparation (predict path) failed"}
                     continue
-                
+
                 last_sequence_np = None
                 if isinstance(prediction_input_sequence_np, np.ndarray):
                     if prediction_input_sequence_np.ndim == 2: # Expected: (sequence_length, num_features)
@@ -275,8 +275,8 @@ class EnhancedStockPredictor:
                     else:
                         self.logger.error(f"[{self.__class__.__name__}] prepare_features_for_prediction for {symbol} returned unexpected ndim: {prediction_input_sequence_np.ndim}, shape: {prediction_input_sequence_np.shape}. Expected 2D. Skipping.")
                         predictions[symbol] = {"error": "Features from prep_for_pred have unexpected dimensions"}
-                        continue
-                else: 
+                    continue
+                else:
                     self.logger.error(f"[{self.__class__.__name__}] prediction_input_sequence_np is not an ndarray after prepare_features_for_prediction for {symbol}.")
                     predictions[symbol] = {"error": "Feature preparation (predict path) failed - not an array"}
                     continue
@@ -284,8 +284,8 @@ class EnhancedStockPredictor:
                 if last_sequence_np is None: # Should be caught by earlier checks, but as a safeguard
                      self.logger.error(f"[{self.__class__.__name__}] last_sequence_np is None for {symbol} after processing. Skipping.")
                      predictions[symbol] = {"error": "Could not derive last_sequence_np for model input."}
-                     continue
-                
+                    continue
+
                 # Ensure data has the right dimensionality for the model input tensor
                 # Standard TFT models expect input of shape [batch_size, sequence_length, num_features]
                 # last_sequence_np is currently (sequence_length, num_features)
