@@ -170,7 +170,7 @@ class EnhancedStockPredictor:
         predictions: Dict[str, Dict[str, Union[float, str]]] = {}
         
         for symbol in symbols:
-            self.logger.info(f"[{self.__class__.__name__}] Processing symbol: {symbol}")
+            self.logger.info(f"[{self.__class__.__name__}] ===== Starting Prediction for: {symbol} =====")
             try:
                 # Fetch latest market data for the symbol
                 # Ensure data is up-to-date for prediction
@@ -179,7 +179,7 @@ class EnhancedStockPredictor:
                 fetch_end_date = datetime.now(pytz.utc)
                 fetch_start_date = fetch_end_date - timedelta(days=60) # Fetch more to be safe, e.g. 60 days
                 
-                self.logger.info(f"[{self.__class__.__name__}] Fetching latest data for {symbol} from {fetch_start_date} to {fetch_end_date}")
+                self.logger.info(f"[{self.__class__.__name__}] Fetching latest raw market data for {symbol} to build the prediction input sequence...")
                 latest_data_df = get_market_data(
                     [symbol],
                     start_date=fetch_start_date.strftime('%Y-%m-%d'),
@@ -187,9 +187,11 @@ class EnhancedStockPredictor:
                 )
                 
                 if latest_data_df.empty:
-                    self.logger.warning(f"[{self.__class__.__name__}] No data fetched for {symbol}, cannot make prediction.")
+                    self.logger.warning(f"[{self.__class__.__name__}] No raw market data was fetched for {symbol}. Cannot make a prediction.")
                     predictions[symbol] = {"error": "No data available"}
                     continue
+                
+                self.logger.info(f"[{self.__class__.__name__}] Successfully fetched {latest_data_df.shape[0]} data points for {symbol}. Last available date: {latest_data_df.index[-1].strftime('%Y-%m-%d') if not latest_data_df.empty else 'N/A'}.")
                 
                 # The fetched data might have a MultiIndex [('symbol', 'date')]
                 # Select data for the current symbol if it's a MultiIndex
@@ -204,28 +206,27 @@ class EnhancedStockPredictor:
 
                 # Check if scaler is fitted. If not, fit it using the historical data available for this symbol.
                 if not self.feature_engineer.is_scaler_fitted():
-                    self.logger.info(f"[{self.__class__.__name__}] Scaler not fitted for symbol {symbol} or globally. Fitting now.")
+                    self.logger.info(f"[{self.__class__.__name__}] Data scaler (for normalizing features) has not been fitted yet for {symbol} (or globally). Attempting to fit it now using the latest fetched data.")
                     # Use the full available `latest_data_df` to fit the scaler appropriately for this symbol context
                     # This assumes `latest_data_df` is the historical data up to the point of prediction for the symbol.
                     # 1. Calculate technical indicators on this data
                     data_for_scaler_fitting_with_indicators = self.feature_engineer.calculate_technical_indicators(latest_data_df.copy()) # Use a copy
                     # 2. Fit the scaler
                     if not data_for_scaler_fitting_with_indicators.empty:
-                        self.logger.info(f"[{self.__class__.__name__}] Fitting scaler with data of shape {data_for_scaler_fitting_with_indicators.shape} for {symbol}.")
+                        self.logger.info(f"[{self.__class__.__name__}] Fitting scaler with feature-engineered data (shape {data_for_scaler_fitting_with_indicators.shape}) for {symbol}.")
                         _ = self.feature_engineer.normalize_features(data_for_scaler_fitting_with_indicators, fit=True)
-                        self.logger.info(f"[{self.__class__.__name__}] Scaler fitted for {symbol}.")
+                        self.logger.info(f"[{self.__class__.__name__}] Scaler has been successfully fitted and stored for {symbol}.")
                     else:
-                        self.logger.warning(f"[{self.__class__.__name__}] Data for scaler fitting is empty for {symbol} after adding indicators. Scaler not fitted.")
+                        self.logger.warning(f"[{self.__class__.__name__}] Data for scaler fitting became empty after adding indicators for {symbol}. Scaler cannot be fitted. Prediction aborted for symbol.")
                         predictions[symbol] = {"error": "Could not fit scaler due to empty data"}
-                        continue # Or handle as a more critical error
+                        continue
                 else:
-                    self.logger.info(f"[{self.__class__.__name__}] Scaler already fitted. Proceeding with feature preparation for {symbol}.")
+                    self.logger.info(f"[{self.__class__.__name__}] Scaler for {symbol} (or global) is already fitted. Proceeding with feature preparation.")
 
                 # Prepare features for the latest data
-                # The feature engineer expects a DataFrame with a simple DatetimeIndex for a single symbol here.
-                self.logger.info(f"[{self.__class__.__name__}] Preparing features for {symbol} using latest_data_df with shape: {latest_data_df.shape}")
+                self.logger.info(f"[{self.__class__.__name__}] Preparing input features for {symbol} from the latest data (current shape: {latest_data_df.shape}). This involves calculating indicators and then scaling.")
                 features_np = self.feature_engineer.prepare_features(latest_data_df) # Fit should be False for prediction
-                self.logger.info(f"[{self.__class__.__name__}] Shape of features_np for {symbol} from feature_engineer: {features_np.shape if isinstance(features_np, np.ndarray) else type(features_np)}")
+                self.logger.info(f"[{self.__class__.__name__}] Features for {symbol} prepared. Resulting NumPy array shape: {features_np.shape if isinstance(features_np, np.ndarray) else type(features_np)}. This will be used to form the input sequence for the model.")
 
                 if not isinstance(features_np, np.ndarray) or features_np.size == 0:
                     self.logger.warning(f"[{self.__class__.__name__}] Feature preparation for {symbol} returned empty or invalid result. Shape: {features_np.shape if isinstance(features_np, np.ndarray) else 'N/A'}. Skipping prediction.")
@@ -236,10 +237,10 @@ class EnhancedStockPredictor:
                 # features_np could be (num_sequences, sequence_length, num_features) or (sequence_length, num_features) if only one sequence
                 if features_np.ndim == 3: # (num_sequences, seq_len, num_features)
                     last_sequence_np = features_np[-1] # Take the most recent sequence
-                    self.logger.info(f"[{self.__class__.__name__}] Selected last_sequence_np (from 3D features_np) for {symbol}, shape: {last_sequence_np.shape}")
+                    self.logger.info(f"[{self.__class__.__name__}] Selected the most recent sequence for {symbol} from the prepared features. Shape of this sequence: {last_sequence_np.shape} (sequence_length, num_features).")
                 elif features_np.ndim == 2: # (seq_len, num_features)
                     last_sequence_np = features_np
-                    self.logger.info(f"[{self.__class__.__name__}] Using features_np directly as last_sequence_np (2D) for {symbol}, shape: {last_sequence_np.shape}")
+                    self.logger.info(f"[{self.__class__.__name__}] Using the prepared features directly as the input sequence for {symbol}. Shape: {last_sequence_np.shape} (sequence_length, num_features).")
                 elif features_np.ndim == 1: # (features_at_last_step_if_flattened_unexpectedly_by_FE)
                     # This case should ideally not happen if prepare_features returns sequences.
                     # If it does, it implies prepare_features might have returned a 1D array of the last timestep's features from a single sequence.
@@ -268,7 +269,7 @@ class EnhancedStockPredictor:
                 # last_sequence_np is currently (sequence_length, num_features)
                 if last_sequence_np.ndim == 2:
                     model_input_np = np.expand_dims(last_sequence_np, axis=0) # Add batch dimension -> (1, sequence_length, num_features)
-                    self.logger.info(f"[{self.__class__.__name__}] Expanded last_sequence_np for {symbol} to model_input_np shape: {model_input_np.shape}")
+                    self.logger.info(f"[{self.__class__.__name__}] Added batch dimension to the sequence for {symbol}. Model input NumPy array shape: {model_input_np.shape} (batch_size, sequence_length, num_features).")
                 else:
                     # This case should not be reached if above logic is correct
                     self.logger.error(f"[{self.__class__.__name__}] last_sequence_np for {symbol} is not 2D after selection. Shape: {last_sequence_np.shape}. Skipping.")
@@ -281,19 +282,19 @@ class EnhancedStockPredictor:
                 if "torch" in sys.modules:
                     import torch
                     model_input_tensor = torch.FloatTensor(model_input_np).to(self.device)
-                    self.logger.info(f"[{self.__class__.__name__}] Converted model_input_np to PyTorch tensor for {symbol}, shape: {model_input_tensor.shape}, device: {model_input_tensor.device}")
+                    self.logger.info(f"[{self.__class__.__name__}] Converted NumPy input sequence to PyTorch tensor for {symbol}. Shape: {model_input_tensor.shape}, Device: {model_input_tensor.device}. This is ready for the model.")
                 elif "tensorflow" in sys.modules:
                     import tensorflow as tf
                     # For TensorFlow, ensure data type matches model expectation (e.g., tf.float32)
                     model_input_tensor = tf.convert_to_tensor(model_input_np, dtype=tf.float32)
-                    self.logger.info(f"[{self.__class__.__name__}] Converted model_input_np to TensorFlow tensor for {symbol}, shape: {model_input_tensor.shape}")
+                    self.logger.info(f"[{self.__class__.__name__}] Converted NumPy input sequence to TensorFlow tensor for {symbol}. Shape: {model_input_tensor.shape}. This is ready for the model.")
                 else:
-                    self.logger.warning("[{self.__class__.__name__}] Neither PyTorch nor TensorFlow found in sys.modules. Passing numpy array to model.")
+                    self.logger.warning("[{self.__class__.__name__}] Neither PyTorch nor TensorFlow found. Passing NumPy array directly to the model for {symbol}.")
                     model_input_tensor = model_input_np # Pass as numpy if framework unclear
 
                 # Make prediction
                 try:
-                    self.logger.info(f"[{self.__class__.__name__}] Calling model for {symbol} with tensor of shape {model_input_tensor.shape if hasattr(model_input_tensor, 'shape') else type(model_input_tensor)}")
+                    self.logger.info(f"[{self.__class__.__name__}] Passing the prepared input tensor to the underlying model ({type(model_to_use).__name__}) for {symbol} to get forecasts...")
                     model_to_use = self._get_or_load_model(symbol)
                     
                     if model_to_use is None:
@@ -302,30 +303,39 @@ class EnhancedStockPredictor:
                         continue
                         
                     self.logger.info(f"[{self.__class__.__name__}] Using model type: {type(model_to_use).__name__} for {symbol}")
-                    pred_output, uncertainty_output = model_to_use(model_input_tensor) # TFTPredictor.__call__ expects a tensor
+                    # TFTPredictor.__call__ now returns an array of scaled predictions and an array of uncertainties
+                    scaled_predictions_array, uncertainties_array = model_to_use(model_input_tensor)
                     
-                    # Process predictions (example, adjust as per your model output)
-                    # Assuming pred_output and uncertainty_output are tensors that need to be converted to numbers
-                    # TFTPredictor.__call__ now returns pred_value, uncertainty_value directly as floats (or np.nan)
-                    pred_value_scaled = pred_output # pred_output is the scaled prediction from TFTPredictor
-                    uncertainty_value = uncertainty_output # uncertainty_output is from TFTPredictor
+                    self.logger.info(f"[{self.__class__.__name__}] Model ({type(model_to_use).__name__}) for {symbol} has returned scaled predictions. Number of steps predicted: {len(scaled_predictions_array) if isinstance(scaled_predictions_array, (np.ndarray, list)) else 'N/A'}.")
+                    
+                    denormalized_predictions_list = []
+                    if isinstance(scaled_predictions_array, np.ndarray) and self.feature_engineer.target_scaler_params is not None:
+                        self.logger.info(f"[{self.__class__.__name__}] Denormalizing the {len(scaled_predictions_array)} scaled prediction steps for {symbol}...")
+                        for i, scaled_pred in enumerate(scaled_predictions_array):
+                            if scaled_pred is not np.nan:
+                                denormalized_pred = self.feature_engineer.inverse_transform_target(scaled_pred)
+                                denormalized_predictions_list.append(denormalized_pred)
+                                self.logger.info(f"  [{self.__class__.__name__}] Step T+{i+1} for {symbol}: Scaled = {scaled_pred:.4f} -> Denormalized = {denormalized_pred:.2f}")
+                            else:
+                                denormalized_predictions_list.append(np.nan)
+                                self.logger.warning(f"  [{self.__class__.__name__}] Step T+{i+1} for {symbol}: Scaled prediction is NaN. Cannot denormalize.")
+                    elif not isinstance(scaled_predictions_array, np.ndarray):
+                        self.logger.error(f"[{self.__class__.__name__}] Scaled predictions for {symbol} is not a numpy array: {type(scaled_predictions_array)}. Cannot process.")
+                        denormalized_predictions_list = [np.nan] * self.prediction_horizon # Fallback
+                    else: # target_scaler_params is None or other issue
+                        self.logger.warning(f"[{self.__class__.__name__}] Target scaler parameters are not available for {symbol}, or scaled predictions are not in the expected array format. Using raw scaled predictions: {scaled_predictions_array}")
+                        # Convert to list if it's an ndarray, otherwise, it might be a single nan or similar
+                        if isinstance(scaled_predictions_array, np.ndarray):
+                            denormalized_predictions_list = scaled_predictions_array.tolist()
+                        else: # If it was a single NaN from TFTPredictor fallback
+                             denormalized_predictions_list = [scaled_predictions_array] * self.prediction_horizon
 
-                    # Denormalize the prediction
-                    if pred_value_scaled is not np.nan and self.feature_engineer.target_scaler_params is not None:
-                        pred_value_denormalized = self.feature_engineer.inverse_transform_target(pred_value_scaled)
-                        self.logger.info(f"[{self.__class__.__name__}] Denormalized prediction for {symbol}: {pred_value_denormalized} (scaled: {pred_value_scaled})")
-                    elif pred_value_scaled is np.nan:
-                        pred_value_denormalized = np.nan
-                        self.logger.warning(f"[{self.__class__.__name__}] Scaled prediction is NaN for {symbol}. Cannot denormalize.")
-                    else: # target_scaler_params is None
-                        pred_value_denormalized = pred_value_scaled # Cannot denormalize, use scaled value with a warning
-                        self.logger.warning(f"[{self.__class__.__name__}] Target scaler params not available for {symbol}. Using scaled prediction: {pred_value_scaled}")
-
-                    self.logger.info(f"[{self.__class__.__name__}] Prediction for {symbol}: {pred_value_denormalized}, Uncertainty: {uncertainty_value}")    
+                    self.logger.info(f"[{self.__class__.__name__}] Final denormalized predictions for {symbol} ({self.prediction_horizon} steps): {denormalized_predictions_list}")
                     predictions[symbol] = {
-                        "prediction": pred_value_denormalized,
-                        "uncertainty": uncertainty_value,
-                        "predicted_at": datetime.now(pytz.utc).isoformat()
+                        "predictions": denormalized_predictions_list, # List of floats
+                        "uncertainties": uncertainties_array, # List of floats
+                        "predicted_at": datetime.now(pytz.utc).isoformat(),
+                        "last_actual_date": latest_data_df.index[-1].strftime('%Y-%m-%d') if not latest_data_df.empty else None
                     }
                     
                 except ValueError as ve:

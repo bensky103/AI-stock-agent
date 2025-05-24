@@ -418,7 +418,7 @@ class TFTPredictor:
         Returns:
             Tuple of (predictions, uncertainty)
         """
-        logger.info(f"TFTPredictor.__call__ with input shape: {sequence_tensor.shape}")
+        logger.info(f"TFTPredictor.__call__ invoked. Input tensor shape: {sequence_tensor.shape}. This tensor contains the historical sequence of features.")
 
         # Ensure model is loaded
         if self.model is None:
@@ -440,7 +440,7 @@ class TFTPredictor:
             logger.info(f"Expanded to 3D with shape: {model_input_np.shape}")
         elif model_input_np.ndim != 3:
             raise TFTPredictorError(f"Input numpy array must be 2D or 3D, got {model_input_np.ndim}D with shape {model_input_np.shape}")
-        logger.info(f"Numpy array shape after initial processing: {model_input_np.shape}")
+        logger.info(f"Input tensor processed into a NumPy array of shape: {model_input_np.shape} (batch_size, sequence_length, num_features). This is the direct input to the feature-to-DataFrame conversion.")
 
         # The model.predict method expects a DataFrame for its internal _prepare_inputs_from_normalized logic
         # We need to construct a DataFrame that TFTModel.predict can handle.
@@ -484,27 +484,32 @@ class TFTPredictor:
         df_for_model['symbol'] = 'DUMMY_GROUP_0' # Placeholder group ID
         df_for_model['target'] = 0.0 # Placeholder target
         
-        logger.info(f"[TFTPredictor] Constructed DataFrame for model prediction with shape: {df_for_model.shape}")
-        df_dtypes_str = df_for_model.dtypes.to_string()
-        logger.info(f"[TFTPredictor] Dtypes of constructed DataFrame:\n{df_dtypes_str}")
+        logger.info(f"[TFTPredictor] Constructed a DataFrame of shape {df_for_model.shape} from the input NumPy array. This DataFrame is formatted for the internal Keras TFT model's predict method.")
+        # Optionally log dtypes if very verbose debugging is needed, but can be noisy.
+        # df_dtypes_str = df_for_model.dtypes.to_string()
+        # logger.info(f"[TFTPredictor] Dtypes of constructed DataFrame:\n{df_dtypes_str}")
 
+        logger.info(f"[TFTPredictor] Calling the internal Keras model's predict method with the formatted DataFrame...")
         raw_predictions = self.model.predict(df_for_model) # TFTModel.predict method
+        logger.info(f"[TFTPredictor] Internal Keras model call complete. Raw output (typically a NumPy array) shape: {raw_predictions.shape}. This includes both historical context and future forecasts.")
         # raw_predictions shape is (batch_size, self.context_length + self.prediction_horizon, 1)
         # e.g. (1, 30 + 5, 1) = (1, 35, 1)
         
-        # Extract the first future prediction step
+        # Extract all future prediction steps
         # The future predictions start after self.context_length (num_encoder_steps)
-        if raw_predictions.shape[0] > 0 and raw_predictions.shape[1] > self.context_length:
-            prediction = raw_predictions[0, self.context_length, 0]
+        # and extend for self.prediction_horizon steps.
+        if (raw_predictions.shape[0] > 0 and 
+            raw_predictions.shape[1] >= self.context_length + self.prediction_horizon):
+            predictions_all_steps = raw_predictions[0, self.context_length : self.context_length + self.prediction_horizon, 0]
         else:
-            logger.error(f"Raw predictions shape {raw_predictions.shape} is not as expected for extracting future prediction at index {self.context_length}.")
-            prediction = np.nan # Fallback to nan if shape is unexpected
+            logger.error(f"Raw predictions Keras output shape {raw_predictions.shape} is not as expected for extracting {self.prediction_horizon} future predictions (expected at least {self.context_length + self.prediction_horizon} time steps). Returning NaNs.")
+            # Return an array of NaNs matching the expected prediction_horizon
+            predictions_all_steps = np.full(self.prediction_horizon, np.nan)
         
-        logger.info(f"Extracted prediction value: {prediction} from result shape {raw_predictions.shape}")
+        logger.info(f"Extracted the {self.prediction_horizon} future prediction steps from the Keras model's output. These are still scaled values. Shape: {predictions_all_steps.shape}. Values: {predictions_all_steps}")
 
-        # For now, uncertainty is a placeholder
-        # TODO: Implement uncertainty extraction if model provides it
-        uncertainty = 0.01  # Placeholder
-        logger.info(f"Prediction: {prediction}, Uncertainty: {uncertainty}")
+        # For now, uncertainty is a list of placeholders, one for each prediction step
+        uncertainties_all_steps = [0.01] * self.prediction_horizon # Placeholder
+        logger.info(f"Predictions: {predictions_all_steps}, Uncertainties: {uncertainties_all_steps}")
         
-        return prediction, uncertainty 
+        return predictions_all_steps, uncertainties_all_steps 

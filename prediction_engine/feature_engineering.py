@@ -194,6 +194,7 @@ class FeatureEngineer:
     
     def calculate_technical_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """Calculate technical indicators."""
+        logger.info(f"[FeatureEngineer] Calculating technical indicators for data with shape {df.shape}. This adds new columns based on existing price/volume data.")
         # Convert column names to lowercase for consistency
         df = df.copy()
         
@@ -308,13 +309,16 @@ class FeatureEngineer:
         # Market regime
         if self.detect_regime:
             # Create a temporary DataFrame with standardized column names
+            logger.info(f"[FeatureEngineer] Detecting market regime...")
             regime_df = pd.DataFrame({
                 'close': _squeeze_if_df(df[close_col]),
                 'high': _squeeze_if_df(df[high_col]),
                 'low': _squeeze_if_df(df[low_col])
             })
             result['market_regime'] = self.market_regime_detector.detect_regime(regime_df)
+            logger.info(f"[FeatureEngineer] Market regime detection complete.")
         
+        logger.info(f"[FeatureEngineer] Technical indicators and market regime (if enabled) calculation complete. DataFrame shape is now {result.shape}.")
         return result
     
     def normalize_features(
@@ -362,8 +366,9 @@ class FeatureEngineer:
         # Apply RobustScaler for normalization
         if self.normalize and self.scaler is not None:
             if fit:
-                logger.info(f"Fitting scaler on feature columns: {feature_cols}")
+                logger.info(f"[FeatureEngineer] Fitting the data scaler (RobustScaler) using {len(feature_cols)} identified feature columns. This learns the centering and scaling parameters.")
                 self.scaler.fit(df[feature_cols])
+                logger.info(f"[FeatureEngineer] Scaler fitting complete. Center values (medians): {self.scaler.center_[:3]}... Scale values (IQRs): {self.scaler.scale_[:3]}...")
                 
                 # Store scaling parameters for the 'close' column if present
                 actual_close_col_in_features = self._find_actual_column_name(feature_cols, 'close')
@@ -376,29 +381,30 @@ class FeatureEngineer:
                             'center': self.scaler.center_[close_idx],
                             'scale': self.scaler.scale_[close_idx]
                         }
-                        logger.info(f"Stored target scaler params for '{actual_close_col_in_features}': {self.target_scaler_params}")
+                        logger.info(f"[FeatureEngineer] Stored specific scaling parameters for target column '{actual_close_col_in_features}': Center={self.target_scaler_params['center']:.2f}, Scale={self.target_scaler_params['scale']:.2f}")
                     except (ValueError, IndexError, AttributeError) as e:
-                        logger.error(f"Could not get/store target scaler params for '{actual_close_col_in_features}': {e}. Scaler arrays might not align, or column not in list used for fit.")
+                        logger.error(f"[FeatureEngineer] Could not get/store target scaler params for '{actual_close_col_in_features}': {e}. This might affect denormalization.")
                         self.target_scaler_params = None 
                 else:
                     logger.warning(f"'close' column (or equivalent) not found among feature_cols used for scaler fitting: {feature_cols}. Cannot store its specific scaling params.")
                     self.target_scaler_params = None
 
-
             # Check if scaler is fitted before transforming
             if not self.is_scaler_fitted():
-                logger.error("Scaler is not fitted, cannot transform. Call with fit=True first or ensure scaler is pre-fitted.")
+                logger.error("[FeatureEngineer] Scaler is not fitted, but normalization was attempted without fitting. Aborting normalization for this step. Call with fit=True first.")
                 # Potentially return df unmodified or raise error
                 return df, self.feature_means, self.feature_stds
-
 
             # Perform transformation
             # Ensure columns exist before attempting to transform
             cols_to_transform = [col for col in feature_cols if col in df.columns]
             if not cols_to_transform:
-                logger.warning("No columns found in DataFrame to apply scaler transform.")
+                logger.warning("[FeatureEngineer] No columns found in DataFrame to apply the scaler transform, though normalization was requested.")
             else:
                 df[cols_to_transform] = self.scaler.transform(df[cols_to_transform])
+                logger.info(f"[FeatureEngineer] Normalization applied. Data shape remains {df.shape}.")
+        else:
+            logger.info("[FeatureEngineer] Normalization is disabled or scaler is not configured. Skipping scaling step.")
         
         return df, self.feature_means, self.feature_stds
 
@@ -586,98 +592,72 @@ class FeatureEngineer:
         return market_features, sentiment_features
 
     def prepare_features(self, market_data: pd.DataFrame) -> np.ndarray:
-        """Prepare features for prediction.
-        
-        This is a wrapper around prepare_prediction_data that returns only the 
-        market features.
-        
+        """Prepares features for prediction (no targets, just the final sequence for input).
+
         Args:
-            market_data: DataFrame containing market data
-            
+            market_data (pd.DataFrame): DataFrame with market data (e.g., OHLCV).
+                                        Assumed to be for a single symbol with DatetimeIndex.
+
         Returns:
-            numpy array of processed features
+            np.ndarray: Numpy array of shape (num_sequences, sequence_length, num_features)
+                        or (sequence_length, num_features) if only one sequence is possible.
+                        This is ready for model input.
         """
-        # Ensure we have enough data
-        if len(market_data) < self.sequence_length:
-            logger.error(f"Not enough data: {len(market_data)} rows, need {self.sequence_length}")
-            raise ValueError(f"Need at least {self.sequence_length} time steps of market data")
-        
-        logger.info(f"[{self.__class__.__name__}] Preparing features from input market_data with shape: {market_data.shape}")
-        
-        # Calculate technical indicators
-        market_with_indicators = self.calculate_technical_indicators(market_data)
-        logger.info(f"[{self.__class__.__name__}] Market data with indicators shape: {market_with_indicators.shape}")
-        
-        # Normalize market data
-        market_normalized, _, _ = self.normalize_features(market_with_indicators)
-        logger.info(f"[{self.__class__.__name__}] Normalized market_normalized data shape: {market_normalized.shape}")
-        if market_normalized.empty:
-            logger.error(f"[{self.__class__.__name__}] market_normalized is empty after normalization.")
-            # Potentially raise an error or return an empty array, depending on desired handling
-            raise ValueError("market_normalized is empty after normalization, cannot prepare features.")
+        logger.info(f"[FeatureEngineer] Starting feature preparation pipeline for prediction using input data of shape {market_data.shape}. Goal is to produce a NumPy array sequence for the model.")
 
-        # Prepare sequences
-        sequences = []
-        # Ensure there's enough data to form at least one sequence
-        if len(market_normalized) >= self.sequence_length:
-            for i in range(len(market_normalized) - self.sequence_length + 1):
-                # Get data for this sequence window
-                window_data = market_normalized.iloc[i:i + self.sequence_length]
-                logger.debug(f"[{self.__class__.__name__}] Loop {i}: window_data shape: {window_data.shape}")
-                
-                # Convert to NumPy array, ensuring we have a 2D shape (sequence_length, features)
-                if isinstance(window_data, pd.DataFrame):
-                    sequence = window_data.values
-                    logger.debug(f"[{self.__class__.__name__}] Loop {i}: sequence from DataFrame shape: {sequence.shape}")
-                elif isinstance(window_data, pd.Series):
-                    sequence = window_data.values
-                    logger.debug(f"[{self.__class__.__name__}] Loop {i}: sequence from Series initial shape: {sequence.shape}")
-                    if sequence.ndim == 1:
-                        # This implies that market_normalized might have only one column.
-                        sequence = sequence.reshape(-1, 1)  # Make it 2D: (sequence_length, 1)
-                        logger.debug(f"[{self.__class__.__name__}] Loop {i}: Reshaped 1D sequence to: {sequence.shape}")
-                else:
-                    logger.warning(f"[{self.__class__.__name__}] Loop {i}: window_data is of unexpected type: {type(window_data)}. Converting to values directly.")
-                    sequence = window_data.values # Fallback
-                    if sequence.ndim == 1: # Ensure 2D if it became 1D
-                        sequence = sequence.reshape(-1,1)
-                    logger.debug(f"[{self.__class__.__name__}] Loop {i}: sequence from unexpected type, shape: {sequence.shape}")
-
-                sequences.append(sequence)
-        else:
-            logger.warning(f"[{self.__class__.__name__}] Not enough data in market_normalized (len: {len(market_normalized)}) to form a sequence of length {self.sequence_length}. Returning empty array.")
-            return np.array([]) # Return empty if no sequences can be formed
-
-        if not sequences:
-            logger.warning(f"[{self.__class__.__name__}] No sequences were created. market_normalized len: {len(market_normalized)}, sequence_length: {self.sequence_length}. Returning empty array.")
+        if market_data.empty:
+            logger.warning("[FeatureEngineer] Input market_data is empty for prepare_features. Returning empty array.")
             return np.array([])
 
-        features = np.array(sequences)
-        logger.info(f"[{self.__class__.__name__}] Stacked sequences into 'features' with shape: {features.shape}")
+        # Calculate technical indicators
+        # Use a copy to avoid modifying the original DataFrame passed to this method
+        market_with_indicators = self.calculate_technical_indicators(market_data.copy())
+        logger.info(f"[FeatureEngineer] Technical indicators added. Shape after indicators: {market_with_indicators.shape}")
+
+        # Normalize market data (fit=False because we use existing scaler parameters)
+        # The normalize_features method handles the actual feature columns for scaling.
+        market_normalized, _, _ = self.normalize_features(market_with_indicators, fit=False)
+        logger.info(f"[FeatureEngineer] Features normalized. Shape after normalization: {market_normalized.shape}")
+
+        # Ensure all required columns for features are present after normalization.
+        # At this stage, market_normalized should contain all necessary feature columns.
+        # Convert to numpy array for sequence stacking.
+        # We need to select only the feature columns that the model expects.
+        # If self.selected_features is defined (from a training phase), use that.
+        # Otherwise, assume all numeric columns are features.
+
+        if self.selected_features is not None and isinstance(self.selected_features, list):
+            # Ensure selected_features are present in market_normalized columns
+            available_selected_features = [f for f in self.selected_features if f in market_normalized.columns]
+            if len(available_selected_features) != len(self.selected_features):
+                logger.warning(f"[FeatureEngineer] Not all previously selected features are available in the normalized data. Expected: {self.selected_features}, Found: {available_selected_features}")
+            final_feature_df = market_normalized[available_selected_features]
+            logger.info(f"[FeatureEngineer] Using {len(available_selected_features)} previously selected features for creating sequences.")
+        else:
+            # Fallback: use all numeric columns if no specific feature selection was done/applied.
+            final_feature_df = market_normalized.select_dtypes(include=np.number)
+            logger.info(f"[FeatureEngineer] No specific feature selection applied; using all {final_feature_df.shape[1]} numeric columns for creating sequences.")
+
+        if final_feature_df.empty:
+            logger.warning("[FeatureEngineer] final_feature_df is empty after normalization/selection in prepare_features. Returning empty array.")
+            return np.array([])
+
+        features_np_all_timesteps = final_feature_df.values
+        logger.info(f"[FeatureEngineer] Converted features to NumPy array of shape {features_np_all_timesteps.shape} (all_timesteps, num_features). Ready for sequence stacking.")
+
+        # Stack into sequences
+        # This will return sequences of shape (num_sequences, sequence_length, num_features)
+        # or (sequence_length, num_features) if only one full sequence can be formed.
+        stacked_sequences = self.sequence_preprocessor.stack_sequences(features_np_all_timesteps)
         
-        # If we have a shape issue with dimensions, resolve it here
-        # If features is a 3D array with shape (1, n, m), remove the batch dimension (common if only one sequence was created)
-        if features.ndim == 3 and features.shape[0] == 1:
-            features = features.squeeze(0)
-            logger.info(f"[{self.__class__.__name__}] Squeezed features shape (dim 0 was 1): {features.shape}")
+        if stacked_sequences.size == 0:
+            logger.warning(f"[FeatureEngineer] Sequence stacking resulted in an empty array. Input shape was {features_np_all_timesteps.shape}, sequence length {self.sequence_length}. Not enough data for a full sequence.")
+            return np.array([]) # Return empty if no sequences could be formed
         
-        # Handle specific case where we have a 2D array with shape (n, 1) - this should NOT be the final output for most models
-        # This might indicate that `market_normalized` only had one feature column, and only one sequence was generated and squeezed.
-        if features.ndim == 2 and features.shape[1] == 1:
-            logger.warning(f"[{self.__class__.__name__}] 'features' has shape {features.shape} (n, 1). This is unusual for sequence features. Flattening to 1D.")
-            features = features.flatten()
-            logger.info(f"[{self.__class__.__name__}] Flattened features with shape (n, 1) to 1D: {features.shape}")
-        
-        # Final check - ensure we don't have a 2D array with shape (n, 1) which causes the error "Data must be 1-dimensional"
-        # This specific check might be too aggressive if a (N,1) shape is legitimately needed by some specific downstream Keras layer.
-        # However, the error message implies it's not expected.
-        if features.ndim == 2 and features.shape[1] == 1:
-            logger.warning(f"[{self.__class__.__name__}] Still detected problematic (n, 1) shape post-processing - forcing flatten again. Shape: {features.shape}")
-            features = features.flatten()
-            logger.info(f"[{self.__class__.__name__}] Final flattened shape: {features.shape}")
-        
-        logger.info(f"[{self.__class__.__name__}] Final features shape to be returned: {features.shape}")
-        return features
+        logger.info(f"[FeatureEngineer] Features stacked into sequences. Final output shape: {stacked_sequences.shape}. This is the model-ready input.")
+        # The output shape could be (num_sequences, sequence_length, num_features) or (sequence_length, num_features)
+        # depending on SequencePreprocessor.stack_sequences logic if only one sequence is produced.
+        return stacked_sequences
 
     def generate_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Generate features from market data.
