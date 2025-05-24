@@ -224,65 +224,68 @@ class EnhancedStockPredictor:
                     continue
 
                 # Check if scaler is fitted. If not, fit it using the historical data available for this symbol.
-                if not self.feature_engineer.is_scaler_fitted():
-                    self.logger.info(f"[{self.__class__.__name__}] Data scaler (for normalizing features) has not been fitted yet for {symbol} (or globally). Attempting to fit it now using the latest fetched data.")
-                    # Use the full available `latest_data_df` to fit the scaler appropriately for this symbol context
-                    # This assumes `latest_data_df` is the historical data up to the point of prediction for the symbol.
-                    # 1. Calculate technical indicators on this data
-                    data_for_scaler_fitting_with_indicators = self.feature_engineer.calculate_technical_indicators(latest_data_df.copy()) # Use a copy
-                    # 2. Fit the scaler
-                    if not data_for_scaler_fitting_with_indicators.empty:
-                        self.logger.info(f"[{self.__class__.__name__}] Fitting scaler with feature-engineered data (shape {data_for_scaler_fitting_with_indicators.shape}) for {symbol}.")
-                        _ = self.feature_engineer.normalize_features(data_for_scaler_fitting_with_indicators, fit=True)
-                        self.logger.info(f"[{self.__class__.__name__}] Scaler has been successfully fitted and stored for {symbol}.")
+                if not self.feature_engineer.is_scaler_fitted(symbol=symbol):
+                    self.logger.info(f"[{self.__class__.__name__}] Data scaler for {symbol} (or global) not fitted. Attempting to fit it now using the latest fetched data.")
+                    
+                    # 1. Calculate TAs on data intended for scaler fitting.
+                    # Pass symbol and fit_scalers=True so calculate_technical_indicators knows this context.
+                    df_with_ta_for_fitting, _ = self.feature_engineer.calculate_technical_indicators(
+                        latest_data_df.copy(), 
+                        symbol=symbol, 
+                        fit_scalers=True # This allows dropping NaNs which is fine for fitting scalers
+                    )
+                    
+                    # 2. Fit the scaler if TA calculation was successful and produced data.
+                    if df_with_ta_for_fitting is not None and not df_with_ta_for_fitting.empty:
+                        self.logger.info(f"[{self.__class__.__name__}] Fitting scaler for {symbol} with TA-data (shape {df_with_ta_for_fitting.shape}).")
+                        try:
+                            self.feature_engineer.fit_scaler(df_with_ta_for_fitting, symbol=symbol)
+                            self.logger.info(f"[{self.__class__.__name__}] Scaler fitted and stored for {symbol}.")
+                        except ScalerHandlerError as e_sh: # Catch potential errors from fit_scaler
+                            self.logger.error(f"[{self.__class__.__name__}] Failed to fit scaler for {symbol}: {e_sh}")
+                            predictions[symbol] = {"error": f"Scaler fitting failed: {e_sh}"}
+                            continue
                     else:
-                        self.logger.warning(f"[{self.__class__.__name__}] Data for scaler fitting became empty after adding indicators for {symbol}. Scaler cannot be fitted. Prediction aborted for symbol.")
-                        predictions[symbol] = {"error": "Could not fit scaler due to empty data"}
+                        self.logger.warning(f"[{self.__class__.__name__}] Data for scaler fitting for {symbol} is None or empty after TA calculation. Scaler not fitted.")
+                        predictions[symbol] = {"error": "Data for scaler fitting empty/None post-TA."}
                         continue
                 else:
                     self.logger.info(f"[{self.__class__.__name__}] Scaler for {symbol} (or global) is already fitted. Proceeding with feature preparation.")
 
                 # Prepare features for the latest data
                 self.logger.info(f"[{self.__class__.__name__}] Preparing input features for {symbol} from the latest data (current shape: {latest_data_df.shape}). This involves calculating indicators and then scaling.")
-                features_np = self.feature_engineer.prepare_features(latest_data_df) # Fit should be False for prediction
-                self.logger.info(f"[{self.__class__.__name__}] Features for {symbol} prepared. Resulting NumPy array shape: {features_np.shape if isinstance(features_np, np.ndarray) else type(features_np)}. This will be used to form the input sequence for the model.")
+                
+                prediction_input_sequence_np, last_close_for_pred = self.feature_engineer.prepare_features_for_prediction(
+                    raw_data=latest_data_df.copy(), 
+                    symbol=symbol
+                )
+                
+                self.logger.info(f"[{self.__class__.__name__}] Features for {symbol} prepared by prepare_features_for_prediction. Resulting NumPy array shape: {prediction_input_sequence_np.shape if isinstance(prediction_input_sequence_np, np.ndarray) else type(prediction_input_sequence_np)}.")
 
-                if not isinstance(features_np, np.ndarray) or features_np.size == 0:
-                    self.logger.warning(f"[{self.__class__.__name__}] Feature preparation for {symbol} returned empty or invalid result. Shape: {features_np.shape if isinstance(features_np, np.ndarray) else 'N/A'}. Skipping prediction.")
-                    predictions[symbol] = {"error": "Feature preparation failed"}
+                if not isinstance(prediction_input_sequence_np, np.ndarray) or prediction_input_sequence_np.size == 0:
+                    self.logger.warning(f"[{self.__class__.__name__}] Feature preparation for {symbol} (prepare_features_for_prediction) returned empty or invalid result. Shape: {prediction_input_sequence_np.shape if isinstance(prediction_input_sequence_np, np.ndarray) else 'N/A'}. Skipping prediction.")
+                    predictions[symbol] = {"error": "Feature preparation (predict path) failed"}
+                    continue
+                
+                last_sequence_np = None
+                if isinstance(prediction_input_sequence_np, np.ndarray):
+                    if prediction_input_sequence_np.ndim == 2: # Expected: (sequence_length, num_features)
+                        last_sequence_np = prediction_input_sequence_np
+                        self.logger.info(f"[{self.__class__.__name__}] Using the 2D sequence from prepare_features_for_prediction directly for {symbol}. Shape: {last_sequence_np.shape}.")
+                    else:
+                        self.logger.error(f"[{self.__class__.__name__}] prepare_features_for_prediction for {symbol} returned unexpected ndim: {prediction_input_sequence_np.ndim}, shape: {prediction_input_sequence_np.shape}. Expected 2D. Skipping.")
+                        predictions[symbol] = {"error": "Features from prep_for_pred have unexpected dimensions"}
+                        continue
+                else: 
+                    self.logger.error(f"[{self.__class__.__name__}] prediction_input_sequence_np is not an ndarray after prepare_features_for_prediction for {symbol}.")
+                    predictions[symbol] = {"error": "Feature preparation (predict path) failed - not an array"}
                     continue
 
-                # Select the last sequence for prediction
-                # features_np could be (num_sequences, sequence_length, num_features) or (sequence_length, num_features) if only one sequence
-                if features_np.ndim == 3: # (num_sequences, seq_len, num_features)
-                    last_sequence_np = features_np[-1] # Take the most recent sequence
-                    self.logger.info(f"[{self.__class__.__name__}] Selected the most recent sequence for {symbol} from the prepared features. Shape of this sequence: {last_sequence_np.shape} (sequence_length, num_features).")
-                elif features_np.ndim == 2: # (seq_len, num_features)
-                    last_sequence_np = features_np
-                    self.logger.info(f"[{self.__class__.__name__}] Using the prepared features directly as the input sequence for {symbol}. Shape: {last_sequence_np.shape} (sequence_length, num_features).")
-                elif features_np.ndim == 1: # (features_at_last_step_if_flattened_unexpectedly_by_FE)
-                    # This case should ideally not happen if prepare_features returns sequences.
-                    # If it does, it implies prepare_features might have returned a 1D array of the last timestep's features from a single sequence.
-                    # The model expects (batch_size, sequence_length, num_features).
-                    # We need to reshape it to (1, sequence_length (if known, or 1), num_features (or len of array if seq_len=1) )
-                    self.logger.warning(f"[{self.__class__.__name__}] features_np for {symbol} is 1D (shape: {features_np.shape}). This is unexpected for sequence input. Attempting reshape.")
-                    # Assuming this 1D array represents features for a single time step in a sequence of length 1 for prediction context
-                    # Or it could be (seq_len,) if only 1 feature. This is ambiguous.
-                    # For TFT, typically expects sequence_length > 1. For now, assuming it needs to be (1, len, 1) or (1, 1, len)
-                    # This path is problematic and indicates an issue in feature_engineer output for sequence models.
-                    # Let's assume it means (num_features,) for a single step of a sequence.
-                    # TFTPredictor expects (batch, seq_len, features).
-                    # If sequence_length for model is self.sequence_length, but we only have one step of features:
-                    # This is likely an error state. The feature engineer should provide a full sequence.
-                    # For now, to avoid immediate crash, we could try to pad or error out.
-                    self.logger.error(f"[{self.__class__.__name__}] Cannot form a sequence from 1D features_np. Feature engineer should provide at least 2D. Skipping {symbol}.")
-                    predictions[symbol] = {"error": "Feature engineer returned 1D features for sequence model"}
-                    continue
-                else:
-                    self.logger.error(f"[{self.__class__.__name__}] features_np for {symbol} has unexpected ndim: {features_np.ndim}, shape: {features_np.shape}. Skipping.")
-                    predictions[symbol] = {"error": "Features have unexpected dimensions"}
-                    continue
-
+                if last_sequence_np is None: # Should be caught by earlier checks, but as a safeguard
+                     self.logger.error(f"[{self.__class__.__name__}] last_sequence_np is None for {symbol} after processing. Skipping.")
+                     predictions[symbol] = {"error": "Could not derive last_sequence_np for model input."}
+                     continue
+                
                 # Ensure data has the right dimensionality for the model input tensor
                 # Standard TFT models expect input of shape [batch_size, sequence_length, num_features]
                 # last_sequence_np is currently (sequence_length, num_features)

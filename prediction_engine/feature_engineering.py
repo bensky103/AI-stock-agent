@@ -246,6 +246,12 @@ class FeatureEngineer:
                 # Return None or raise error if DatetimeIndex is critical
                 return None, None 
 
+        # Handle MultiIndex columns by taking the first level (e.g., 'Open' from ('Open', 'AAPL'))
+        if isinstance(df.columns, pd.MultiIndex):
+            logger.info(f"===== FeatureEngineer: MultiIndex columns detected: {df.columns.tolist()}. Converting to single-level columns. =====")
+            df.columns = df.columns.get_level_values(0)
+            logger.info(f"===== FeatureEngineer: Columns after MultiIndex conversion: {df.columns.tolist()} =====")
+
         df = self._convert_column_names(df)
 
         required_cols = ['open', 'high', 'low', 'close', 'volume']
