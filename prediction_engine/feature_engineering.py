@@ -209,9 +209,9 @@ class FeatureEngineer:
                 check_is_fitted(scaler_to_check)
                 # Also check if we have target scaling parameters, which are crucial.
                 target_params = self._get_target_scaler_params(symbol)
-                is_target_params_valid = target_params and \ 
-                                         isinstance(target_params.get('center'), (int, float)) and \ 
-                                         isinstance(target_params.get('scale'), (int, float)) and \ 
+                is_target_params_valid = target_params and \
+                                         isinstance(target_params.get('center'), (int, float)) and \
+                                         isinstance(target_params.get('scale'), (int, float)) and \
                                          target_params.get('scale') != 0
                 if is_target_params_valid:
                     logger.debug(f"===== FeatureEngineer: Scaler for '{symbol if symbol else 'global'}' is fitted and target params are valid. =====")
