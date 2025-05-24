@@ -293,7 +293,7 @@ class EnhancedStockPredictor:
                     else:
                         self.logger.error(f"[{self.__class__.__name__}] prepare_features_for_prediction for {symbol} returned unexpected ndim: {prediction_input_sequence_np.ndim}, shape: {prediction_input_sequence_np.shape}. Expected 2D. Skipping.")
                         predictions[symbol] = {"error": "Features from prep_for_pred have unexpected dimensions"}
-                    continue
+                        continue
                 else:
                     self.logger.error(f"[{self.__class__.__name__}] prediction_input_sequence_np is not an ndarray after prepare_features_for_prediction for {symbol}.")
                     predictions[symbol] = {"error": "Feature preparation (predict path) failed - not an array"}
