@@ -891,8 +891,8 @@ class FeatureEngineer:
             # Check for feature count mismatch before transform
             if pca_model_to_use.n_features_in_ != data_numeric.shape[1]:
                 logger.error(f"===== FeatureEngineer: PCA model expects {pca_model_to_use.n_features_in_} features, but input data has {data_numeric.shape[1]} numeric features. Cannot transform. Symbol: '{symbol if symbol else 'global'}'. =====")
-                logger.error(f"PCA model features: {pca_model_to_use.get_feature_names_out() if hasattr(pca_model_to_use, 'get_feature_names_out') else 'N/A'}\")
-                logger.error(f"Input numeric features: {data_numeric.columns.tolist()}\")
+                logger.error(f"PCA model features: {pca_model_to_use.get_feature_names_out() if hasattr(pca_model_to_use, 'get_feature_names_out') else 'N/A'}")
+                logger.error(f"Input numeric features: {data_numeric.columns.tolist()}")
                 return data # Return original data if feature count mismatch
 
 
@@ -1047,7 +1047,7 @@ class FeatureEngineer:
         # For now, a simple check against sequence_length. Longest TA lookback is 200.
         min_required_rows = self.sequence_length + 200 # A rough estimate, should be more precise
         if len(raw_data) < self.sequence_length : # Basic check
-             logger.warning(f"===== FeatureEngineer (predict): Insufficient raw data rows ({len(raw_data)}) for symbol '{symbol}' to form a sequence of length {self.sequence_length}. Prediction might be compromised. (Min ideally {min_required_rows} for all TAs) =====\")
+             logger.warning(f"===== FeatureEngineer (predict): Insufficient raw data rows ({len(raw_data)}) for symbol '{symbol}' to form a sequence of length {self.sequence_length}. Prediction might be compromised. (Min ideally {min_required_rows} for all TAs) =====")
              # If len(raw_data) < self.sequence_length, sequence creation will fail later.
 
         # 1. Calculate Technical Indicators (and other StockFormatter features)
@@ -1208,7 +1208,10 @@ class FeatureEngineer:
             logger.error(f"===== FeatureEngineer (predict): CRITICAL - The final prepared sequence for symbol '{symbol}' (shape {last_sequence.shape}) CONTAINS NaNs. Model prediction will likely fail or be highly inaccurate. =====")
             # Example: np.argwhere(np.isnan(last_sequence)) could show where NaNs are.
 
-        return last_sequence, last_close_price
+        # Return the DataFrame that was used to create the sequence, plus the last close price
+        # The TFTPredictor will be responsible for selecting the final features for the Keras model from this DataFrame.
+        logger.info(f"===== FeatureEngineer (predict): Returning final features DataFrame for '{symbol}' (shape {df_for_sequence_input.shape}) and last_close_price {last_close_price}. This DataFrame should contain all necessary scaled features. =====")
+        return df_for_sequence_input, last_close_price
 
 
 if __name__ == "__main__":

@@ -172,12 +172,15 @@ class EnhancedStockPredictor:
         for symbol in symbols:
             self.logger.info(f"[{self.__class__.__name__}] ===== Starting Prediction for: {symbol} =====")
             try:
-                # Fetch latest market data for the symbol
                 # Ensure data is up-to-date for prediction
                 # Using a recent period that should cover self.sequence_length
                 # The actual length of data needed will be sequence_length for feature prep.
                 fetch_end_date = datetime.now(pytz.utc)
-                fetch_start_date_predict = fetch_end_date - timedelta(days=60) # Default for prediction input
+                # Max lookback from FeatureEngineer for SMAs/EMAs is 200. Sequence length is 30.
+                # Need at least 200 (max_lookback) + 30 (sequence_length) = 230 days.
+                # Add buffer for non-trading days and to be safe.
+                required_days_for_features_and_sequence = 200 + self.feature_engineer.sequence_length + 50 # 200 (max_lookback) + seq_len + buffer
+                fetch_start_date_predict = fetch_end_date - timedelta(days=required_days_for_features_and_sequence) 
                 
                 self.logger.info(f"[{self.__class__.__name__}] Fetching latest raw market data for {symbol} to build the prediction input sequence...")
                 latest_data_df = get_market_data(

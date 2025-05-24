@@ -14,6 +14,7 @@ import pandas as pd
 from pathlib import Path
 from datetime import datetime, timedelta
 import sys
+from typing import Optional
 
 # Ensure logs directory exists
 os.makedirs('logs', exist_ok=True)
@@ -405,111 +406,200 @@ class TFTPredictor:
             raise
     
     def get_attention_weights(self, inputs) -> np.ndarray:
-        """Get attention weights for interpretability."""
-        # Not implemented in this version
-        raise NotImplementedError("Attention weights visualization is not implemented")
-        
-    def __call__(self, sequence_tensor):
-        """Handle PyTorch tensor inputs for prediction.
-        
-        Args:
-            sequence_tensor: PyTorch tensor of shape [batch_size, sequence_length, features]
-            
-        Returns:
-            Tuple of (predictions, uncertainty)
+        # Placeholder for getting attention weights if implemented
+        return np.array([])
+
+    def __call__(self, features_df: pd.DataFrame, symbol: Optional[str] = None):
         """
-        logger.info(f"TFTPredictor.__call__ invoked. Input tensor shape: {sequence_tensor.shape}. This tensor contains the historical sequence of features.")
+        Make predictions using the TFT model from a feature DataFrame.
 
-        # Ensure model is loaded
+        Args:
+            features_df (pd.DataFrame): DataFrame containing all necessary features, 
+                                        scaled and processed by FeatureEngineer. 
+                                        The DataFrame should have enough rows to extract 
+                                        a sequence of `context_length`.
+            symbol (Optional[str]): Symbol for context, mainly for logging.
+
+        Returns:
+            np.ndarray: Prediction array, typically (prediction_horizon,)
+            
+        Raises:
+            TFTPredictorError: If prediction fails
+        """
         if self.model is None:
-            self.model = self._load_model()
+            logger.info("Keras model not loaded. Loading now...")
+            self.model = self._load_model() # Ensure Keras model is loaded
 
-        # Convert to numpy if it's a PyTorch tensor
-        if hasattr(sequence_tensor, 'cpu') and hasattr(sequence_tensor, 'numpy'):
-            model_input_np = sequence_tensor.cpu().numpy()
-            logger.info(f"Converted to numpy with shape: {model_input_np.shape}")
-        elif isinstance(sequence_tensor, np.ndarray):
-            model_input_np = sequence_tensor
-            logger.info(f"Input is already numpy with shape: {model_input_np.shape}")
+        if features_df.empty:
+            raise TFTPredictorError(f"Input features_df is empty for symbol '{symbol}'.")
+
+        if len(features_df) < self.context_length:
+            raise TFTPredictorError(
+                f"Insufficient rows in features_df for symbol '{symbol}' to form a sequence. "
+                f"Got {len(features_df)}, need {self.context_length}."
+            )
+
+        # Use StockFormatter to get the canonical list of features expected by Keras TFTModel
+        # The Keras TFTModel derives its num_historical_features etc. from this.
+        from colab_training.data_formatters.stock_formatter import StockFormatter, InputTypes
+        formatter = StockFormatter() # Uses its internal column_definition
+
+        # 1. Prepare Historical Inputs (the (1, sequence_length, num_historical_features) array)
+        # These are features of type TARGET, OBSERVED, KNOWN in StockFormatter.column_definition
+        # Their order is derived from StockFormatter.column_definition
+        historical_feature_names = [
+            col for col, type_ in formatter.column_definition 
+            if type_ in [InputTypes.TARGET, InputTypes.OBSERVED, InputTypes.KNOWN]
+        ]
+        
+        num_expected_hist_features = self.model.input_shape[1][-1] # From Keras model: (batch, seq_len, num_hist_features)
+        
+        if len(historical_feature_names) != num_expected_hist_features:
+            logger.warning(
+                f"Number of historical features from StockFormatter ({len(historical_feature_names)}) "
+                f"does not match Keras model expected historical features ({num_expected_hist_features}). "
+                f"StockFormatter historical features: {historical_feature_names[:5]}..."
+            )
+            # This is a critical mismatch if it occurs, means Keras model init vs. this list are out of sync.
+            # For now, we will trust num_expected_hist_features and try to select if possible, 
+            # but ideally these should always match.
+
+        # Select the last `self.context_length` rows for the input sequence
+        sequence_df = features_df.iloc[-self.context_length:]
+
+        # Ensure all historical_feature_names are in sequence_df
+        missing_hist_cols = [col for col in historical_feature_names if col not in sequence_df.columns]
+        if missing_hist_cols:
+            raise TFTPredictorError(
+                f"Missing historical features in input DataFrame for symbol '{symbol}': {missing_hist_cols}. "
+                f"Available columns: {sequence_df.columns.tolist()}"
+            )
+        
+        # Select and order historical features
+        # If len(historical_feature_names) > num_expected_hist_features, we must only pick the ones Keras wants.
+        # However, the Keras model itself determines num_historical_features from the *full* list from StockFormatter.
+        # So, historical_feature_names should be the definitive list.
+        historical_inputs_df = sequence_df[historical_feature_names]
+        historical_inputs_np = historical_inputs_df.to_numpy().astype(np.float32)
+        historical_inputs_np = historical_inputs_np.reshape(1, self.context_length, len(historical_feature_names))
+
+        # 2. Prepare Static Inputs
+        static_feature_names = [
+            col for col, type_ in formatter.column_definition if type_ == InputTypes.STATIC
+        ]
+        num_expected_static_features = self.model.input_shape[0][-1]
+
+        static_inputs_list = []
+        if static_feature_names:
+            # For static features, take the values from the *last* row of the input df (or any, should be constant for the sequence)
+            for sf_name in static_feature_names:
+                if sf_name in features_df.columns:
+                    static_inputs_list.append(features_df[sf_name].iloc[-1]) 
+                else:
+                    logger.warning(f"Static feature '{sf_name}' not found in features_df for '{symbol}'. Using 0.")
+                    static_inputs_list.append(0) # Default to 0 if missing
+        
+        if len(static_inputs_list) != num_expected_static_features:
+            logger.warning(
+                f"Number of static features prepared ({len(static_inputs_list)}) from StockFormatter "
+                f"does not match Keras model expected static features ({num_expected_static_features}). Using zeros if needed."
+            )
+            # Pad with zeros or truncate if mismatch, or rely on Keras error
+            # Forcing to the Keras expected shape with zeros for missing ones.
+            final_static_list = [0.0] * num_expected_static_features
+            for i in range(min(len(static_inputs_list), num_expected_static_features)):
+                final_static_list[i] = static_inputs_list[i]
+            static_inputs_np = np.array(final_static_list).astype(np.float32).reshape(1, num_expected_static_features)
         else:
-            raise TFTPredictorError(f"Unsupported input type for sequence_tensor: {type(sequence_tensor)}")
+            static_inputs_np = np.array(static_inputs_list).astype(np.float32).reshape(1, num_expected_static_features)
 
-        # Reshape if necessary (e.g. if it's 2D [seq_len, features] and model expects 3D [batch, seq_len, features])
-        if model_input_np.ndim == 2:
-            model_input_np = np.expand_dims(model_input_np, axis=0)
-            logger.info(f"Expanded to 3D with shape: {model_input_np.shape}")
-        elif model_input_np.ndim != 3:
-            raise TFTPredictorError(f"Input numpy array must be 2D or 3D, got {model_input_np.ndim}D with shape {model_input_np.shape}")
-        logger.info(f"Input tensor processed into a NumPy array of shape: {model_input_np.shape} (batch_size, sequence_length, num_features). This is the direct input to the feature-to-DataFrame conversion.")
+        # 3. Prepare Future Inputs (Known Future Inputs)
+        # These are features of type KNOWN in StockFormatter.column_definition
+        # For this Keras model, num_future_features is likely 0 from logs `Future=(1, 5, 0)`
+        future_feature_names = [
+            col for col, type_ in formatter.column_definition if type_ == InputTypes.KNOWN
+        ]
+        # Filter out those already in historical_feature_names to avoid duplication if a KNOWN is also OBSERVED/TARGET
+        # However, the Keras TFTModel defines num_future_features independently based on KNOWN only.
+        # The `historical_inputs` layer uses TARGET, OBSERVED, KNOWN.
+        # The `future_inputs` layer uses only KNOWN.
+        # This implies that if a feature is KNOWN, it can appear in *both* historical (as past known values) and future inputs (as future known values).
+        # For prediction, we only have historical data up to 'now'. We don't typically have *actual* future knowns unless they are like 'day_of_week' for future dates.
+        # If FeatureEngineer doesn't produce true future values for these, this array will be based on past values or zeros.
 
-        # The model.predict method expects a DataFrame for its internal _prepare_inputs_from_normalized logic
-        # We need to construct a DataFrame that TFTModel.predict can handle.
-        # This requires knowing the feature names the model was trained on or expects.
-        # This is a challenging part if feature names are not stored or passed correctly.
+        num_expected_future_features = self.model.input_shape[2][-1] # (batch, horizon, num_future_features)
+        
+        # For prediction, we might not have actual future values for these knowns. 
+        # The Keras model might be trained to handle this (e.g. if future knowns are only for training targets).
+        # If num_expected_future_features is 0, this array is just a placeholder.
+        if num_expected_future_features > 0:
+            logger.warning(
+                f"Keras model expects {num_expected_future_features} future_features, but constructing them for prediction is complex "
+                f"unless they are trivial (e.g., time flags). For now, using zeros or last known values. "
+                f"Future feature names from StockFormatter (type KNOWN): {future_feature_names}"
+            )
+            # Create placeholder future inputs: (1, prediction_horizon, num_future_features)
+            # If these features are genuinely needed and are not just time flags, this needs more sophisticated handling.
+            future_inputs_np = np.zeros((1, self.prediction_horizon, num_expected_future_features), dtype=np.float32)
+            for i, f_name in enumerate(future_feature_names):
+                if i < num_expected_future_features: # Ensure we don't exceed Keras expected dimension
+                    if f_name in features_df.columns:
+                        # Repeat last known value for all future steps - very basic imputation
+                        last_known_val = features_df[f_name].iloc[-1]
+                        future_inputs_np[0, :, i] = last_known_val
+                    else:
+                        logger.warning(f"Future feature '{f_name}' not in features_df for '{symbol}'. Using 0 for future inputs.")
+                        future_inputs_np[0, :, i] = 0 # Default to 0
+        else: # num_expected_future_features is 0
+            future_inputs_np = np.zeros((1, self.prediction_horizon, 0), dtype=np.float32)
 
-        # Assuming model_input_np is (batch, seq_len, num_features)
-        # For now, we pass the numpy array directly, assuming TFTModel.predict can handle it
-        # or that it will be wrapped appropriately by TFTModel.predict or its helpers.
-        # The TFTModel.predict now uses _prepare_inputs_from_normalized which takes a DataFrame.
-        # We need to create this DataFrame.
 
-        num_features = model_input_np.shape[2]
-        # Try to get feature names from model_config or generate generic ones
-        feature_names = self.model_config.get("model_config", {}).get("input_feature_names", None)
-        if not feature_names or len(feature_names) != num_features:
-            logger.warning(f"Could not find explicit feature names in model_config.json. Generating generic feature names: feature_0 to feature_{num_features-1}. This is a fallback and might lead to errors if names don't match training.")
-            feature_names = [f"feature_{i}" for i in range(num_features)]
+        logger.info(f"Prepared inputs for Keras model '{symbol}': "
+                    f"Static shape: {static_inputs_np.shape}, "
+                    f"Historical shape: {historical_inputs_np.shape}, "
+                    f"Future shape: {future_inputs_np.shape}")
 
-        # We need to create a DataFrame for each item in the batch (currently batch_size=1 is assumed for prediction)
-        # The DataFrame should have `self.context_length` rows and `num_features` columns.
-        # The TFTModel.predict method and its helpers expect the DataFrame to have a specific structure,
-        # including a time index and a group identifier if the model was trained with them.
-        
-        # For simplicity in this __call__ method, which receives a raw sequence tensor,
-        # we'll make a DataFrame from the first (and only) item in the batch.
-        # This assumes self.context_length matches model_input_np.shape[1]
-        if model_input_np.shape[1] != self.context_length:
-            # This should not happen if data prep upstream uses correct sequence length from config
-            logger.error(f"CRITICAL: Input sequence length {model_input_np.shape[1]} does not match model context length {self.context_length}!")
-            # Fallback or raise error - for now, will likely cause issues in TFTModel.predict
-        
-        # Create a DataFrame from the first sequence in the batch
-        # This step matches how TFTModel.predict expects its input DataFrame based on its internal logic.
-        # This needs self.context_length (num_encoder_steps) and feature_names.
-        # The target column is also typically expected by the formatter inside TFTModel.predict.
-        # For prediction, the target column in the input df to TFTModel.predict is usually a placeholder.
-        
-        df_for_model = pd.DataFrame(model_input_np[0], columns=feature_names)
-        df_for_model['time_idx'] = np.arange(self.context_length)
-        df_for_model['symbol'] = 'DUMMY_GROUP_0' # Placeholder group ID
-        df_for_model['target'] = 0.0 # Placeholder target
-        
-        logger.info(f"[TFTPredictor] Constructed a DataFrame of shape {df_for_model.shape} from the input NumPy array. This DataFrame is formatted for the internal Keras TFT model's predict method.")
-        # Optionally log dtypes if very verbose debugging is needed, but can be noisy.
-        # df_dtypes_str = df_for_model.dtypes.to_string()
-        # logger.info(f"[TFTPredictor] Dtypes of constructed DataFrame:\n{df_dtypes_str}")
+        try:
+            # Ensure the Keras model's predict or __call__ can handle this input structure.
+            # The Keras TFTModel has a `predict(self, df)` which calls `_prepare_inputs`.
+            # We are bypassing that internal _prepare_inputs and constructing the arrays directly.
+            # The Keras Model itself (tf.keras.Model) is callable.
+            raw_predictions = self.model.predict([static_inputs_np, historical_inputs_np, future_inputs_np])
+            
+            # Assuming raw_predictions is (batch_size, prediction_horizon) or (batch_size, prediction_horizon, 1)
+            # For a single prediction, batch_size is 1. We want (prediction_horizon,)
+            if raw_predictions.ndim == 3 and raw_predictions.shape[0] == 1 and raw_predictions.shape[2] == 1:
+                processed_predictions = raw_predictions.reshape(self.prediction_horizon)
+            elif raw_predictions.ndim == 2 and raw_predictions.shape[0] == 1:
+                processed_predictions = raw_predictions.reshape(self.prediction_horizon)
+            else:
+                logger.error(f"Unexpected prediction output shape from Keras model for '{symbol}': {raw_predictions.shape}")
+                raise TFTPredictorError("Unexpected Keras prediction output shape")
+            
+            logger.info(f"Raw prediction for '{symbol}' (first 5): {processed_predictions[:5]}")
+            return processed_predictions
+            
+        except Exception as e:
+            logger.error(f"Error during Keras model prediction for '{symbol}': {e}")
+            logger.error(f"Historical input sample (first 5 features, first 3 steps):\n{historical_inputs_np[0, :3, :5] if historical_inputs_np.size > 0 else 'N/A'}")
+            raise TFTPredictorError(f"Keras model prediction failed for '{symbol}': {e}")
 
-        logger.info(f"[TFTPredictor] Calling the internal Keras model's predict method with the formatted DataFrame...")
-        raw_predictions = self.model.predict(df_for_model) # TFTModel.predict method
-        logger.info(f"[TFTPredictor] Internal Keras model call complete. Raw output (typically a NumPy array) shape: {raw_predictions.shape}. This includes both historical context and future forecasts.")
-        # raw_predictions shape is (batch_size, self.context_length + self.prediction_horizon, 1)
-        # e.g. (1, 30 + 5, 1) = (1, 35, 1)
-        
-        # Extract all future prediction steps
-        # The future predictions start after self.context_length (num_encoder_steps)
-        # and extend for self.prediction_horizon steps.
-        if (raw_predictions.shape[0] > 0 and 
-            raw_predictions.shape[1] >= self.context_length + self.prediction_horizon):
-            predictions_all_steps = raw_predictions[0, self.context_length : self.context_length + self.prediction_horizon, 0]
-        else:
-            logger.error(f"Raw predictions Keras output shape {raw_predictions.shape} is not as expected for extracting {self.prediction_horizon} future predictions (expected at least {self.context_length + self.prediction_horizon} time steps). Returning NaNs.")
-            # Return an array of NaNs matching the expected prediction_horizon
-            predictions_all_steps = np.full(self.prediction_horizon, np.nan)
-        
-        logger.info(f"Extracted the {self.prediction_horizon} future prediction steps from the Keras model's output. These are still scaled values. Shape: {predictions_all_steps.shape}. Values: {predictions_all_steps}")
+    def predict_actual(self, input_sequence: np.ndarray, symbol: Optional[str] = None) -> np.ndarray:
+        """
+        DEPRECATED: This method is kept for now if other parts of the system call it directly with a NumPy array.
+        The main prediction path should now use __call__ with a DataFrame.
+        """
+        logger.warning(
+            f"[{self.__class__.__name__}] predict_actual is DEPRECATED. Use __call__ with a DataFrame. "
+            f"Symbol: {symbol}, Input shape: {input_sequence.shape if input_sequence is not None else 'None'}"
+        )
+        # Return an empty array or an array of NaNs with the expected prediction_horizon length
+        # to avoid breaking downstream code that expects a certain shape.
+        # self.prediction_horizon should be available from _load_config()
+        return np.full(self.prediction_horizon if hasattr(self, 'prediction_horizon') else 5, np.nan)
 
-        # For now, uncertainty is a list of placeholders, one for each prediction step
-        uncertainties_all_steps = [0.01] * self.prediction_horizon # Placeholder
-        logger.info(f"Predictions: {predictions_all_steps}, Uncertainties: {uncertainties_all_steps}")
-        
-        return predictions_all_steps, uncertainties_all_steps 
+    # Placeholder for potential future methods or end of class
+
+    # Placeholder for getting attention weights if implemented
+    def get_attention_weights(self, inputs) -> np.ndarray:
+        return np.array([]) 
