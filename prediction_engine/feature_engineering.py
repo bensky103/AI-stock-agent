@@ -233,6 +233,18 @@ class FeatureEngineer:
         logger.debug(f"===== FeatureEngineer: No scaler found for '{symbol if symbol else 'global'}' to check if fitted. =====")
         return False
 
+    def _get_target_scaler_params(self, symbol: Optional[str] = None) -> Optional[Dict[str, float]]:
+        """Retrieves the target scaler parameters for the symbol or globally."""
+        if symbol and symbol in self.target_scaler_params:
+            logger.debug(f"===== FeatureEngineer: Retrieving target scaler params for symbol '{symbol}'. =====")
+            return self.target_scaler_params[symbol]
+        elif self.global_target_scaler_params is not None:
+            logger.debug("===== FeatureEngineer: Retrieving global target scaler params. =====")
+            return self.global_target_scaler_params
+        
+        logger.warning(f"===== FeatureEngineer: No target scaler params available (neither for symbol '{symbol}' nor global). =====")
+        return None
+
     def _get_scaler(self, symbol: Optional[str] = None) -> Optional[RobustScaler]:
         """Retrieves the appropriate scaler (symbol-specific or global)."""
         if symbol and symbol in self.scalers:
