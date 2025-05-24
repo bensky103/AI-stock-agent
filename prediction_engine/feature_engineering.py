@@ -413,7 +413,7 @@ class FeatureEngineer:
             if symbol:
                 self.scalers[symbol] = scaler
                 logger.info(f"===== FeatureEngineer: Scaler for symbol '{symbol}' has been fitted and stored. =====")
-        else:
+            else:
                 self.global_scaler = scaler
                 logger.info("===== FeatureEngineer: Global scaler has been fitted and stored. =====")
 
