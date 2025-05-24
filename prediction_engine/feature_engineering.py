@@ -757,10 +757,22 @@ class FeatureEngineer:
                     logger.error(f"===== FeatureEngineer: Data for sequencing for symbol '{symbol}' still has NaNs after fill and dropping all-NaN columns (cols: {remaining_nan_cols}). Cannot create sequences reliably. =====")
                     return None
 
-        sequences_np = self.sequence_preprocessor.create_sequences(data_subset_for_seq.values) # Pass NumPy array
+        # sequences_np = self.sequence_preprocessor.create_sequence(data_subset_for_seq.values) # Pass NumPy array
+        # The SequencePreprocessor.create_sequence method expects a DataFrame and feature_cols, and returns a dict.
+        sequence_dict = self.sequence_preprocessor.create_sequence(
+            df=data_subset_for_seq, 
+            feature_cols=features_for_sequencing, # Pass the list of feature names
+            target_col=self.target_column_name # Assuming target_col is needed, though might not be used if only features are extracted
+        )
+        
+        if not sequence_dict or 'features' not in sequence_dict:
+            logger.error(f"===== FeatureEngineer: SequencePreprocessor.create_sequence did not return a valid dictionary with 'features' for symbol '{symbol}'. =====")
+            return None
+            
+        sequences_np = sequence_dict['features']
         
         if sequences_np is None or sequences_np.size == 0:
-            logger.error(f"===== FeatureEngineer: Sequence creation by SequencePreprocessor returned None or empty array for symbol '{symbol}'. Input data for seq was shape {data_subset_for_seq.shape}. =====")
+            logger.error(f"===== FeatureEngineer: SequencePreprocessor.create_sequence returned None or empty array for symbol '{symbol}'. Input data for seq was shape {data_subset_for_seq.shape}. =====")
             return None
 
         logger.info(f"===== FeatureEngineer: Sequences created successfully for symbol '{symbol}'. Shape: {sequences_np.shape} (num_sequences, sequence_length, num_features). =====")
