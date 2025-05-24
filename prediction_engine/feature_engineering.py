@@ -733,35 +733,46 @@ class FeatureEngineer:
         
         # Convert selected DataFrame columns to NumPy array for sequence creation
         # Make sure to handle cases where some features might be all NaN after processing, though ideally handled earlier.
-        data_subset_for_seq = data[features_for_sequencing]
-        if data_subset_for_seq.isnull().values.any():
-            nan_cols_in_seq_data = data_subset_for_seq.columns[data_subset_for_seq.isnull().any()].tolist()
-            logger.warning(f"===== FeatureEngineer: Data for sequencing for symbol '{symbol}' contains NaNs in columns: {nan_cols_in_seq_data}. Attempting ffill then bfill on this subset. =====")
-            data_subset_for_seq.ffill(inplace=True)
-            data_subset_for_seq.bfill(inplace=True)
-            if data_subset_for_seq.isnull().values.any():
-                # Check for columns that are still entirely NaN
-                all_nan_cols_in_subset = data_subset_for_seq.columns[data_subset_for_seq.isnull().all()].tolist()
-                if all_nan_cols_in_subset:
-                    logger.warning(f"===== FeatureEngineer: Columns {all_nan_cols_in_subset} are entirely NaN in data for sequencing for symbol '{symbol}' AFTER fill. Dropping them. =====")
-                    data_subset_for_seq = data_subset_for_seq.drop(columns=all_nan_cols_in_subset)
-                    # Update features_for_sequencing list to reflect dropped columns
-                    features_for_sequencing = [f for f in features_for_sequencing if f not in all_nan_cols_in_subset]
-                    if data_subset_for_seq.empty or not features_for_sequencing:
-                         logger.error(f"===== FeatureEngineer: Data for sequencing became empty or no features left for symbol '{symbol}' after dropping all-NaN columns. Cannot create sequences. =====")
-                         return None
-                
-                # Re-check for any remaining NaNs (e.g., partial NaNs that couldn't be filled)
-                if data_subset_for_seq.isnull().values.any():
-                    remaining_nan_cols = data_subset_for_seq.columns[data_subset_for_seq.isnull().any()].tolist()
-                    logger.error(f"===== FeatureEngineer: Data for sequencing for symbol '{symbol}' still has NaNs after fill and dropping all-NaN columns (cols: {remaining_nan_cols}). Cannot create sequences reliably. =====")
+        # data_subset_for_seq = data[features_for_sequencing]
+
+        # Ensure the DataFrame passed to SequencePreprocessor contains both features and the target column.
+        columns_for_preprocessor_input_df = list(set(features_for_sequencing + [self.target_column_name]))
+        # Ensure all these columns actually exist in the input `data` DataFrame to avoid KeyErrors
+        columns_for_preprocessor_input_df = [col for col in columns_for_preprocessor_input_df if col in data.columns]
+        
+        if not columns_for_preprocessor_input_df:
+            logger.error(f"===== FeatureEngineer: No columns (features + target) available in data for symbol '{symbol}' to pass to sequence preprocessor. Original features_for_sequencing: {features_for_sequencing}, target: {self.target_column_name}. Data columns: {data.columns.tolist()} =====")
+            return None
+
+        data_for_preprocessor = data[columns_for_preprocessor_input_df].copy() # Use a copy
+
+        # NaN handling for the preprocessor input data
+        if data_for_preprocessor.isnull().values.any():
+            nan_cols_in_preprocessor_data = data_for_preprocessor.columns[data_for_preprocessor.isnull().any()].tolist()
+            logger.warning(f"===== FeatureEngineer: Data for SequencePreprocessor for symbol '{symbol}' (shape {data_for_preprocessor.shape}) contains NaNs in columns: {nan_cols_in_preprocessor_data}. Attempting ffill then bfill. =====")
+            data_for_preprocessor.ffill(inplace=True)
+            data_for_preprocessor.bfill(inplace=True)
+            
+            all_nan_cols_after_fill = data_for_preprocessor.columns[data_for_preprocessor.isnull().all()].tolist()
+            if all_nan_cols_after_fill:
+                logger.warning(f"===== FeatureEngineer: Columns {all_nan_cols_after_fill} are entirely NaN in data for SequencePreprocessor for symbol '{symbol}' AFTER fill. Dropping them. =====")
+                data_for_preprocessor.drop(columns=all_nan_cols_after_fill, inplace=True)
+                # If target column was dropped, this will fail later in preprocessor, which is fine (error will be more specific).
+                # Update features_for_sequencing if any of its columns were dropped.
+                features_for_sequencing = [f for f in features_for_sequencing if f in data_for_preprocessor.columns]
+                if not features_for_sequencing and self.target_column_name not in data_for_preprocessor.columns:
+                    logger.error(f"===== FeatureEngineer: Data for SequencePreprocessor became unusable for symbol '{symbol}' after dropping all-NaN columns (no features and no target). =====")
                     return None
 
-        # sequences_np = self.sequence_preprocessor.create_sequence(data_subset_for_seq.values) # Pass NumPy array
+            if data_for_preprocessor.isnull().values.any():
+                remaining_nan_cols = data_for_preprocessor.columns[data_for_preprocessor.isnull().any()].tolist()
+                logger.error(f"===== FeatureEngineer: Data for SequencePreprocessor for symbol '{symbol}' (shape {data_for_preprocessor.shape}) still has NaNs after fill and dropping all-NaN columns (cols: {remaining_nan_cols}). This might cause issues in SequencePreprocessor. =====")
+                # Proceeding, but SequencePreprocessor might raise error if target or critical features are NaN.
+
         # The SequencePreprocessor.create_sequence method expects a DataFrame and feature_cols, and returns a dict.
         sequence_dict = self.sequence_preprocessor.create_sequence(
-            df=data_subset_for_seq, 
-            feature_cols=features_for_sequencing, # Pass the list of feature names
+            df=data_for_preprocessor, 
+            feature_cols=features_for_sequencing, # Pass the original list of feature names
             target_col=self.target_column_name # Assuming target_col is needed, though might not be used if only features are extracted
         )
         
@@ -772,7 +783,7 @@ class FeatureEngineer:
         sequences_np = sequence_dict['features']
         
         if sequences_np is None or sequences_np.size == 0:
-            logger.error(f"===== FeatureEngineer: SequencePreprocessor.create_sequence returned None or empty array for symbol '{symbol}'. Input data for seq was shape {data_subset_for_seq.shape}. =====")
+            logger.error(f"===== FeatureEngineer: SequencePreprocessor.create_sequence returned None or empty array for symbol '{symbol}'. Input data for seq was shape {data_for_preprocessor.shape}. =====")
             return None
 
         logger.info(f"===== FeatureEngineer: Sequences created successfully for symbol '{symbol}'. Shape: {sequences_np.shape} (num_sequences, sequence_length, num_features). =====")
