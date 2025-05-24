@@ -284,7 +284,7 @@ class EnhancedStockPredictor:
                 if last_sequence_np is None: # Should be caught by earlier checks, but as a safeguard
                      self.logger.error(f"[{self.__class__.__name__}] last_sequence_np is None for {symbol} after processing. Skipping.")
                      predictions[symbol] = {"error": "Could not derive last_sequence_np for model input."}
-                    continue
+                     continue
 
                 # Ensure data has the right dimensionality for the model input tensor
                 # Standard TFT models expect input of shape [batch_size, sequence_length, num_features]
