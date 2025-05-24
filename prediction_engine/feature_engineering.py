@@ -13,7 +13,9 @@ import pytz
 from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.decomposition import PCA
 from sklearn.feature_selection import SelectKBest, f_regression
-import ta
+import ta as ta_lib # Renaming to avoid conflict if pandas_ta is also aliased to ta
+import pandas_ta as ta # For df.ta accessor
+import traceback # For logging exception tracebacks
 from ta.trend import SMAIndicator, EMAIndicator, MACD, ADXIndicator
 from ta.momentum import RSIIndicator, StochasticOscillator
 from ta.volatility import BollingerBands, AverageTrueRange
