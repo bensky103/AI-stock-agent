@@ -23,6 +23,22 @@ from ta.trend import SMAIndicator, EMAIndicator, MACD, ADXIndicator
 from ta.momentum import RSIIndicator, StochasticOscillator # Assuming StochasticOscillator might be used
 from ta.volatility import BollingerBands, AverageTrueRange
 from ta.volume import VolumeWeightedAveragePrice, MFIIndicator # Assuming these might be used
+
+# Import InputTypes from the base formatter if available, or define a placeholder
+try:
+    from colab_training.data_formatters.base import InputTypes
+except ImportError:
+    logger.warning("Could not import InputTypes from colab_training.data_formatters.base. Defining a placeholder.")
+    class InputTypes: # Placeholder
+        ID = 0
+        TIME = 1
+        TARGET = 2
+        OBSERVED = 3
+        KNOWN = 4
+        STATIC = 5
+        CATEGORICAL = 6
+        REAL_VALUED = 7 # Assuming this might be used by scalers
+
 from .sequence_preprocessor import SequencePreprocessor
 from .scaler_handler import ScalerHandlerError # Import the custom error
 
@@ -127,24 +143,59 @@ class FeatureEngineer:
     Enhanced feature engineering for stock prediction.
     
     This class handles:
-    1. Technical indicators calculation
+    1. Technical indicators calculation aligned with StockFormatter
     2. Market regime detection
-    3. Feature selection and dimensionality reduction
-    4. Advanced data normalization
+    3. Feature selection and dimensionality reduction (can be disabled)
+    4. Data normalization using StandardScaler (to match StockFormatter)
     5. Sequence preparation for TFT models
     """
     
+    # Features defined by StockFormatter (excluding ID, TIME, TARGET)
+    STOCK_FORMATTER_FEATURES = [
+        ('open', InputTypes.OBSERVED),
+        ('high', InputTypes.OBSERVED),
+        ('low', InputTypes.OBSERVED),
+        ('volume', InputTypes.OBSERVED),
+        ('returns', InputTypes.OBSERVED),
+        ('volatility', InputTypes.OBSERVED), # Needs window definition
+        ('static_id_placeholder', InputTypes.STATIC), 
+        ('market_cap', InputTypes.OBSERVED), # Fundamental, might be NaN
+        ('pe_ratio', InputTypes.OBSERVED), # Fundamental, might be NaN
+        ('dividend_yield', InputTypes.OBSERVED), # Fundamental, might be NaN
+        ('rsi', InputTypes.OBSERVED), # Assuming rsi_14 from original
+        ('macd', InputTypes.OBSERVED),
+        ('macd_signal', InputTypes.OBSERVED),
+        ('macd_hist', InputTypes.OBSERVED),
+        ('bb_upper', InputTypes.OBSERVED),
+        ('bb_middle', InputTypes.OBSERVED),
+        ('bb_lower', InputTypes.OBSERVED),
+        ('atr', InputTypes.OBSERVED), # Assuming atr_14 from original
+        ('volume_sma', InputTypes.OBSERVED), # Needs window definition
+        ('volume_ratio', InputTypes.OBSERVED), # Needs base for ratio
+        ('price_sma_5', InputTypes.OBSERVED),
+        ('price_sma_10', InputTypes.OBSERVED),
+        ('price_sma_20', InputTypes.OBSERVED),
+        ('price_sma_50', InputTypes.OBSERVED),
+        ('price_sma_200', InputTypes.OBSERVED),
+        ('price_ema_5', InputTypes.OBSERVED),
+        ('price_ema_10', InputTypes.OBSERVED),
+        ('price_ema_20', InputTypes.OBSERVED),
+        ('price_ema_50', InputTypes.OBSERVED),
+        ('price_ema_200', InputTypes.OBSERVED),
+        ('market_regime', InputTypes.CATEGORICAL), 
+        ('trading_signal', InputTypes.CATEGORICAL) # Needs definition
+    ]
+
     def __init__(
         self,
-        sequence_length: int = 10,
-        prediction_horizon: int = 1,
-        technical_indicators: Optional[List[str]] = None,
+        sequence_length: int = 30, # Default from formatter_config
+        prediction_horizon: int = 5, # Default from formatter_config
         normalize: bool = True,
-        use_feature_selection: bool = True,
-        n_features: int = 20,
+        use_feature_selection: bool = False, # Disable by default, use all StockFormatter features initially
+        n_features: int = 25, # Target number of features if selection is enabled
         use_pca: bool = False,
         n_components: int = 10,
-        detect_regime: bool = True
+        detect_regime: bool = True # Corresponds to 'market_regime'
     ):
         self.sequence_length = sequence_length
         self.prediction_horizon = prediction_horizon
@@ -154,43 +205,40 @@ class FeatureEngineer:
         self.use_pca = use_pca
         self.n_components = n_components
         self.detect_regime = detect_regime
-        self.scalers: Dict[str, RobustScaler] = {} # Symbol -> Scaler
-        self.global_scaler: Optional[RobustScaler] = None
-        self.target_scaler_params: Dict[str, Dict[str, float]] = {} # Initialize as empty dict
+        self.scalers: Dict[str, StandardScaler] = {} # Symbol -> Scaler, changed to StandardScaler
+        self.global_scaler: Optional[StandardScaler] = None # Changed to StandardScaler
+        self.target_scaler_params: Dict[str, Dict[str, float]] = {} 
         self.global_target_scaler_params: Optional[Dict[str, float]] = None
         self.pca_models: Dict[str, PCA] = {}
         self.global_pca_model: Optional[PCA] = None
-        self.feature_columns: Optional[List[str]] = None # Populated after TA calculation
-        self.selected_features: Optional[List[str]] = None # Populated after feature selection
-        self.target_column_name = 'close' # Default target column name
+        
+        # Store the names of features that will be generated
+        self.feature_columns = [name for name, type_ in self.STOCK_FORMATTER_FEATURES 
+                                if type_ in [InputTypes.OBSERVED, InputTypes.KNOWN, InputTypes.STATIC, InputTypes.CATEGORICAL]]
+        
+        self.selected_features: Optional[List[str]] = None 
+        self.target_column_name = 'close' # Default target column name, matches StockFormatter
 
         logger.info(f"===== FeatureEngineer initialized. Sequence length: {self.sequence_length}, Horizon: {self.prediction_horizon}, Target: '{self.target_column_name}'. Feature selection: {self.use_feature_selection}, PCA: {self.use_pca}, Regime Detection: {self.detect_regime} =====")
         
-        # Default technical indicators
-        self.technical_indicators = technical_indicators or [
-            'sma_20', 'sma_50', 'ema_20', 'ema_50',
-            'rsi_14', 'macd', 'macd_signal', 'macd_hist',
-            'bb_upper', 'bb_middle', 'bb_lower', 'bb_width',
-            'atr_14', 'vwap', 'mfi_14', 'stoch_k', 'stoch_d',
-            'adx_14', 'cci_14', 'williams_r'
-        ]
+        # Removed self.technical_indicators list, will use STOCK_FORMATTER_FEATURES logic
         
-        # Initialize components
         self.sequence_preprocessor = SequencePreprocessor(sequence_length)
         self.market_regime_detector = MarketRegimeDetector() if detect_regime else None
+        # Feature selector and PCA remain, but their usage might change based on how many features STOCK_FORMATTER_FEATURES generate
         self.feature_selector = SelectKBest(f_regression, k=n_features) if use_feature_selection else None
         self.pca = PCA(n_components=n_components) if use_pca else None
-        self.scaler = RobustScaler() if normalize else None  # More robust to outliers
+        # Use StandardScaler to align with StockFormatter
+        self.scaler = StandardScaler() if normalize else None 
         
-        # Store transformation parameters
-        self.feature_means = None
-        self.feature_stds = None
-        self.selected_features = None
+        self.feature_means = None # Deprecate if using StandardScaler's mean_
+        self.feature_stds = None # Deprecate if using StandardScaler's scale_
+        # self.selected_features is kept
         self.pca_components = None
         
         logger.info(
-            f"Initialized feature engineer with {len(self.technical_indicators)} "
-            f"technical indicators"
+            f"Initialized feature engineer to generate features based on StockFormatter definition. "
+            f"Number of potential features: {len(self.feature_columns)}. "
         )
     
     def _find_actual_column_name(self, columns_list: Union[pd.Index, List], generic_name: str) -> Optional[Union[str, tuple]]:
@@ -205,7 +253,7 @@ class FeatureEngineer:
 
     def is_scaler_fitted(self, symbol: Optional[str] = None) -> bool:
         """Checks if a scaler is fitted for the symbol or globally."""
-        scaler_to_check = None
+        scaler_to_check: Optional[StandardScaler] = None # Ensure type hint matches
         if symbol and symbol in self.scalers:
             scaler_to_check = self.scalers[symbol]
         elif self.global_scaler is not None:
@@ -213,14 +261,19 @@ class FeatureEngineer:
         
         if scaler_to_check is not None:
             try:
-                # Check if the scaler has been fitted by looking for attributes like 'center_'
-                check_is_fitted(scaler_to_check)
-                # Also check if we have target scaling parameters, which are crucial.
+                # Check if the scaler has been fitted by looking for attributes like 'mean_' for StandardScaler
+                check_is_fitted(scaler_to_check) 
                 target_params = self._get_target_scaler_params(symbol)
                 is_target_params_valid = target_params and \
                                          isinstance(target_params.get('center'), (int, float)) and \
                                          isinstance(target_params.get('scale'), (int, float)) and \
-                                         target_params.get('scale') != 0
+                                         target_params.get('scale') != 0 # scale for RobustScaler, std for StandardScaler
+                # For StandardScaler, scale is 'scale_', center is 'mean_'
+                # For RobustScaler, it's 'center_' and 'scale_'
+                # We need to ensure this check is compatible with StandardScaler
+                # Let's assume 'center' maps to mean and 'scale' maps to std/scale depending on scaler type.
+                # The self.target_scaler_params stores them as 'center' and 'scale'
+                
                 if is_target_params_valid:
                     logger.debug(f"===== FeatureEngineer: Scaler for '{symbol if symbol else 'global'}' is fitted and target params are valid. =====")
                     return True
@@ -245,7 +298,7 @@ class FeatureEngineer:
         logger.warning(f"===== FeatureEngineer: No target scaler params available (neither for symbol '{symbol}' nor global). =====")
         return None
 
-    def _get_scaler(self, symbol: Optional[str] = None) -> Optional[RobustScaler]:
+    def _get_scaler(self, symbol: Optional[str] = None) -> Optional[StandardScaler]: # Changed return type
         """Retrieves the appropriate scaler (symbol-specific or global)."""
         if symbol and symbol in self.scalers:
             logger.debug(f"===== FeatureEngineer: Retrieving scaler for symbol '{symbol}'. =====")
@@ -254,8 +307,8 @@ class FeatureEngineer:
             logger.debug("===== FeatureEngineer: Retrieving global scaler. =====")
             return self.global_scaler
         
-        logger.warning(f"===== FeatureEngineer: No scaler available (neither for symbol '{symbol}' nor global). Requested scaler but none found. =====")
-        return None
+        logger.debug(f"===== FeatureEngineer: No scaler available (neither for symbol '{symbol}' nor global). Will create a new one if fit=True. =====")
+        return None # No scaler available or not fitted
 
     def _convert_column_names(self, df: pd.DataFrame) -> pd.DataFrame:
         """Converts column names to lowercase and replaces spaces with underscores."""
@@ -266,129 +319,232 @@ class FeatureEngineer:
         return df
 
     def calculate_technical_indicators(self, data: pd.DataFrame, symbol: Optional[str] = None, fit_scalers: bool = False) -> Tuple[Optional[pd.DataFrame], Optional[float]]:
-        """Calculates technical indicators and optionally market regime features."""
-        logger.info(f"===== FeatureEngineer: Calculating technical indicators for data with shape {data.shape}. Fit_scalers: {fit_scalers}, Symbol: {symbol}. This adds new columns based on existing price/volume data. =====")
-        df = data.copy()
-        if not isinstance(df.index, pd.DatetimeIndex):
-            try:
-                df.index = pd.to_datetime(df.index)
-                logger.info("===== FeatureEngineer: Index converted to DatetimeIndex. =====")
-            except Exception as e:
-                logger.error(f"===== FeatureEngineer: Failed to convert index to DatetimeIndex: {e}. TA calculation might fail. Index type: {type(df.index)}. First few values: {df.index[:3]} =====")
-                # Return None or raise error if DatetimeIndex is critical
-                return None, None 
-
-        # Handle MultiIndex columns by taking the first level (e.g., 'Open' from ('Open', 'AAPL'))
-        if isinstance(df.columns, pd.MultiIndex):
-            logger.info(f"===== FeatureEngineer: MultiIndex columns detected: {df.columns.tolist()}. Converting to single-level columns. =====")
-            df.columns = df.columns.get_level_values(0)
-            logger.info(f"===== FeatureEngineer: Columns after MultiIndex conversion: {df.columns.tolist()} =====")
-
-        df = self._convert_column_names(df)
-
-        required_cols = ['open', 'high', 'low', 'close', 'volume']
-        missing_cols = [col for col in required_cols if col not in df.columns]
-        if missing_cols:
-            logger.error(f"===== FeatureEngineer: Missing required columns for TA calculation: {missing_cols}. Available columns: {df.columns.tolist()} =====")
-            return None, None
-
-        for col in required_cols:
-            if df[col].isnull().any():
-                nan_count = df[col].isnull().sum()
-                logger.warning(f"===== FeatureEngineer: Column '{col}' has {nan_count} NaN values before TA calculation. Attempting ffill. Data shape: {df.shape} =====")
-                df[col] = df[col].ffill()
-                if df[col].isnull().any():
-                    logger.error(f"===== FeatureEngineer: Column '{col}' still has NaNs after ffill. Cannot proceed with TA calculation. =====")
-                    return None, None
-
-        try:
-            # Add custom indicators directly using their classes from ta library
-            df['sma_50'] = SMAIndicator(close=df['close'], window=50).sma_indicator()
-            df['ema_20'] = EMAIndicator(close=df['close'], window=20).ema_indicator()
-            df['rsi_14'] = RSIIndicator(close=df['close'], window=14).rsi()
-            
-            bbands_indicator = BollingerBands(close=df['close'], window=20, window_dev=2)
-            df['bbands_upper'] = bbands_indicator.bollinger_hband()
-            df['bbands_middle'] = bbands_indicator.bollinger_mavg()
-            df['bbands_lower'] = bbands_indicator.bollinger_lband()
-            
-            macd_indicator = MACD(close=df['close'], window_fast=12, window_slow=26, window_sign=9)
-            df['macd_line'] = macd_indicator.macd()
-            df['macd_signal'] = macd_indicator.macd_signal()
-            df['macd_hist'] = macd_indicator.macd_diff()
-            
-            df['atr_14'] = AverageTrueRange(high=df['high'], low=df['low'], close=df['close'], window=14).average_true_range()
-
-            logger.info(f"===== FeatureEngineer: Additional custom TAs (SMA, EMA, RSI, BBands, MACD, ATR) applied. Shape after: {df.shape} =====")
-
-        except Exception as e:
-            logger.error(f"===== FeatureEngineer: Error during technical indicator calculation: {e} =====")
-            logger.error(traceback.format_exc())
-            return None, None
-
-        if self.detect_regime:
-            logger.info("===== FeatureEngineer: Detecting market regime... =====")
-            try:
-                # Example: Using rolling volatility to define regimes
-                df['log_return'] = np.log(df['close'] / df['close'].shift(1))
-                df['volatility_20d'] = df['log_return'].rolling(window=20).std() * np.sqrt(252) # Annualized
-                
-                # Define regimes (example: low, medium, high volatility)
-                low_vol_threshold = df['volatility_20d'].quantile(0.33)
-                high_vol_threshold = df['volatility_20d'].quantile(0.67)
-                
-                df['market_regime'] = 0 # Default (medium)
-                df.loc[df['volatility_20d'] < low_vol_threshold, 'market_regime'] = -1 # Low
-                df.loc[df['volatility_20d'] > high_vol_threshold, 'market_regime'] = 1  # High
-                
-                # One-hot encode market_regime
-                regime_dummies = pd.get_dummies(df['market_regime'], prefix='regime', dummy_na=False)
-                df = pd.concat([df, regime_dummies], axis=1)
-                # Drop original market_regime and intermediate columns if not needed
-                df.drop(columns=['log_return', 'volatility_20d', 'market_regime'], inplace=True, errors='ignore')
-                logger.info("===== FeatureEngineer: Market regime detection complete. Added one-hot encoded regime features. Shape after: {df.shape} =====")
-            except Exception as e: 
-                logger.error(f"===== FeatureEngineer: Error during market regime detection: {e}. Proceeding without regime features. =====")
-                logger.error(traceback.format_exc())
-
-        # Store column names *after* all TAs are calculated, before NaN drop or selection
-        # This should ideally be only numeric columns meant for scaling/PCA/selection
-        # Exclude original OHLCV if they are not intended to be direct features for the final model
-        # For now, assume all numeric columns generated are potential features.
-        self.feature_columns = df.select_dtypes(include=np.number).columns.tolist()
-        logger.info(f"===== FeatureEngineer: Identified {len(self.feature_columns)} numeric feature columns after TA and regime: {self.feature_columns[:5]}... =====")
-
-        # Handle NaNs from TA calculations (e.g., rolling windows at the start)
-        # A common strategy is to drop rows with NaNs, but this reduces sequence length.
-        # Another is to fill, but that might introduce noise.
-        # For sequence models, preserving sequence integrity is important.
-        # If `fit_scalers` is True, we are likely fitting on a larger historical dataset where dropping initial NaNs is fine.
-        # If `fit_scalers` is False (i.e., for prediction), we need `sequence_length` valid rows at the end.
+        """
+        Calculate technical indicators and other features based on StockFormatter definition.
+        The input 'data' DataFrame is expected to have at least 'open', 'high', 'low', 'close', 'volume'.
+        It might also contain 'adj_close'. Column names can be mixed case or MultiIndex.
         
-        nan_rows_before_drop = df.isnull().any(axis=1).sum()
-        if nan_rows_before_drop > 0:
-            logger.warning(f"===== FeatureEngineer: Data has {nan_rows_before_drop} rows with NaNs after TA calculation (total rows: {len(df)}). This is common due to lookback periods of indicators. =====")
-            if fit_scalers: # If fitting scalers, we can afford to drop initial NaNs
-                df.dropna(inplace=True)
-                logger.info(f"===== FeatureEngineer: Dropped {nan_rows_before_drop} rows with NaNs because fit_scalers=True. Shape after drop: {df.shape}. =====")
-                if df.empty:
-                    logger.error("===== FeatureEngineer: DataFrame became empty after dropping NaNs during scaler fitting. Cannot proceed. =====")
-                    return None, None
-            # else: For prediction, NaNs at the start of the required sequence are problematic.
-                # The sequence extraction later should handle taking the last `sequence_length` valid rows.
-                # We might still have NaNs if the lookback for indicators is > (total_data - sequence_length).
-                # For now, let prepare_features_for_prediction handle this by taking the tail.
-            pass # Don't dropna if preparing for prediction, sequence logic handles it.
+        Args:
+            data: Input DataFrame with OHLCV data.
+            symbol: Stock symbol for context and logging.
+            fit_scalers: If True, implies this data is for fitting scalers (longer history).
+                         If False, it's for prediction (shorter, most recent history).
 
-        last_close_price = df[self.target_column_name].iloc[-1] if not df.empty and self.target_column_name in df else None
-        if last_close_price is None:
-            logger.warning(f"===== FeatureEngineer: Could not determine last close price. Target column '{self.target_column_name}' might be missing or data is empty. =====")
+        Returns:
+            Tuple: (DataFrame with all engineered features, last_close_price)
+                   Returns (None, None) if essential columns are missing or errors occur.
+        """
+        logger.info(f"===== FeatureEngineer: Calculating technical indicators for data with shape {data.shape}. Fit_scalers: {fit_scalers}, Symbol: {symbol}. This adds new columns based on existing price/volume data. =====")
+        
+        if data.empty:
+            logger.error(f"===== FeatureEngineer: Input data is empty for symbol '{symbol}'. Cannot calculate features. =====")
+            return None, None
 
-        logger.info(f"===== FeatureEngineer: Technical indicators and market regime (if enabled) calculation complete. DataFrame shape is now {df.shape}. Last close: {last_close_price} =====")
+        # Standardize column names first (e.g., to lowercase, handle MultiIndex)
+        # The input 'data' from MarketFeed is already standardized somewhat, but let's ensure.
+        # If data.columns is a MultiIndex like [('Open', 'TSLA'), ('Close', 'TSLA'), ...],
+        # we need to convert it to a flat index for 'ta' library and general processing.
+        original_cols = data.columns.tolist() # For debugging
+        if isinstance(data.columns, pd.MultiIndex):
+            logger.info(f"===== FeatureEngineer: MultiIndex columns detected: {data.columns.tolist()}. Converting to single-level columns. =====")
+            # Assuming the first level of MultiIndex is the feature type (e.g., 'Open', 'Close')
+            # And the second level is the symbol, which we don't need here as data is per-symbol.
+            # Or, if it's like ('Adj Close', 'TSLA') from predictor, we simplify.
+            
+            # If the multi-index is like ('feature_name', 'symbol_name')
+            if len(data.columns.names) == 2 and data.columns.names[0] is not None and data.columns.names[1] is not None:
+                 # Example: columns=[('High', 'TSLA'), ('Low', 'TSLA')]
+                data.columns = data.columns.get_level_values(0) # Take the first level, e.g., 'High', 'Low'
+            else: # Try to infer, could be just yfinance's default ('Open', 'High', ...) if not processed by MarketFeed for single symbol
+                # This case handles when yfinance download for single symbol results in flat columns already.
+                # Or if it's like [('Adj Close', 'TSLA'), ...] from predictor calling market_feed for single symbol.
+                # We want to extract the primary feature name.
+                new_cols = []
+                for col_tuple in data.columns:
+                    if isinstance(col_tuple, tuple) and len(col_tuple) > 0:
+                        new_cols.append(str(col_tuple[0])) # Take the first element, e.g., 'Adj Close' from ('Adj Close', 'TSLA')
+                    else:
+                        new_cols.append(str(col_tuple)) # If not a tuple, use as is
+                data.columns = new_cols
+            
+            data.columns = [str(c).lower().replace(' ', '_') for c in data.columns]
+            logger.info(f"===== FeatureEngineer: Columns after MultiIndex conversion: {data.columns.tolist()} =====")
+        else:
+            data.columns = [str(c).lower().replace(' ', '_') for c in data.columns] # Ensure lowercase and underscore
+
+        # Make a copy to avoid SettingWithCopyWarning
+        df = data.copy()
+
+        # Ensure required base columns are present
+        required_base_cols = ['open', 'high', 'low', 'close', 'volume']
+        missing_cols = [col for col in required_base_cols if col not in df.columns]
+        if missing_cols:
+            logger.error(f"===== FeatureEngineer: Missing required base columns for TA: {missing_cols}. Available: {df.columns.tolist()}. Original was: {original_cols} =====")
+            return None, None
+        
+        # Handle 'adj_close' if present, otherwise use 'close'
+        # StockFormatter does not explicitly list 'adj_close' as a primary feature it generates TAs from,
+        # but it's good practice to prefer it if available for price-based TAs.
+        # However, for consistency with StockFormatter, let's assume 'close' is the primary for TA calculations.
+        # If 'adj_close' is needed, StockFormatter should reflect that.
+        # The logs show 'adj_close' being part of initial features, then 'close' for TAs.
+        # For now, stick to 'close' as the primary for TA calculations as per typical 'ta' library usage.
+
+        last_close_price = df['close'].iloc[-1] if not df['close'].empty else np.nan
+
+        # --- Feature Calculation based on StockFormatter ---
+        # Observed features (direct or simple calculations)
+        if 'returns' in self.feature_columns:
+            df['returns'] = df['close'].pct_change() 
+        
+        if 'volatility' in self.feature_columns: # Example: 20-day rolling std dev of returns
+            df['volatility'] = df['returns'].rolling(window=20, min_periods=1).std() 
+
+        # Fundamental data (market_cap, pe_ratio, dividend_yield)
+        # These are typically not in yfinance history output directly for daily data.
+        # They might be available via ticker.info or a different API endpoint.
+        # For now, create NaN columns if they are expected.
+        # The model training phase with StockFormatter must have handled how these are sourced or imputed.
+        for fundamental_col in ['market_cap', 'pe_ratio', 'dividend_yield']:
+            if fundamental_col in self.feature_columns and fundamental_col not in df.columns:
+                df[fundamental_col] = np.nan 
+
+        # Technical Indicators using 'ta' library
+        # Ensure parameters (windows, etc.) match what StockFormatter implies or common defaults if unspecified.
+        
+        # RSI (rsi_14 was in old list, 'rsi' in StockFormatter)
+        if 'rsi' in self.feature_columns:
+            df['rsi'] = RSIIndicator(close=df['close'], window=14, fillna=False).rsi()
+
+        # MACD
+        if 'macd' in self.feature_columns or 'macd_signal' in self.feature_columns or 'macd_hist' in self.feature_columns:
+            macd_indicator = MACD(close=df['close'], window_slow=26, window_fast=12, window_sign=9, fillna=False)
+            if 'macd' in self.feature_columns:
+                df['macd'] = macd_indicator.macd()
+            if 'macd_signal' in self.feature_columns:
+                df['macd_signal'] = macd_indicator.macd_signal()
+            if 'macd_hist' in self.feature_columns:
+                df['macd_hist'] = macd_indicator.macd_diff() # macd_hist is the difference
+
+        # Bollinger Bands
+        if 'bb_upper' in self.feature_columns or 'bb_middle' in self.feature_columns or 'bb_lower' in self.feature_columns:
+            bb_indicator = BollingerBands(close=df['close'], window=20, window_dev=2, fillna=False)
+            if 'bb_upper' in self.feature_columns:
+                df['bb_upper'] = bb_indicator.bollinger_hband()
+            if 'bb_middle' in self.feature_columns: # This is typically the SMA20
+                df['bb_middle'] = bb_indicator.bollinger_mavg()
+            if 'bb_lower' in self.feature_columns:
+                df['bb_lower'] = bb_indicator.bollinger_lband()
+        
+        # ATR (atr_14 was in old list, 'atr' in StockFormatter)
+        if 'atr' in self.feature_columns:
+            df['atr'] = AverageTrueRange(high=df['high'], low=df['low'], close=df['close'], window=14, fillna=False).average_true_range()
+
+        # Volume-based indicators
+        if 'volume_sma' in self.feature_columns: # e.g., volume_sma_20
+            df['volume_sma'] = SMAIndicator(close=df['volume'], window=20, fillna=False).sma_indicator()
+        
+        if 'volume_ratio' in self.feature_columns: # Ratio of current volume to its SMA
+            if 'volume_sma' in df.columns and not df['volume_sma'].empty:
+                 # Avoid division by zero or NaN if volume_sma is zero or NaN
+                df['volume_ratio'] = df['volume'] / df['volume_sma'].replace(0, np.nan)
+            else: # Calculate volume_sma if not already present for this specific feature
+                temp_volume_sma = SMAIndicator(close=df['volume'], window=20, fillna=True).sma_indicator() # fillna=True temporarily
+                df['volume_ratio'] = df['volume'] / temp_volume_sma.replace(0, np.nan)
+
+
+        # Price SMAs
+        price_sma_windows = [5, 10, 20, 50, 200]
+        for window in price_sma_windows:
+            col_name = f'price_sma_{window}'
+            if col_name in self.feature_columns:
+                df[col_name] = SMAIndicator(close=df['close'], window=window, fillna=False).sma_indicator()
+
+        # Price EMAs
+        price_ema_windows = [5, 10, 20, 50, 200]
+        for window in price_ema_windows:
+            col_name = f'price_ema_{window}'
+            if col_name in self.feature_columns:
+                df[col_name] = EMAIndicator(close=df['close'], window=window, fillna=False).ema_indicator()
+        
+        # Market Regime (Categorical)
+        if 'market_regime' in self.feature_columns and self.detect_regime and self.market_regime_detector:
+            try:
+                # MarketRegimeDetector.detect_regime returns a Series of numerical values (e.g., -1, 0, 1)
+                # StockFormatter treats 'market_regime' as CATEGORICAL, implies it might need label encoding later.
+                # The current MarketRegimeDetector already calculates a complex regime.
+                # Let's assume its output is suitable for now, or can be mapped.
+                # The output of detect_regime might be float; ensure it can be handled by LabelEncoder
+                regime_output = self.market_regime_detector.detect_regime(df).fillna(0) # fillna with neutral
+                # Discretize or map to specific categories if necessary before label encoding by StockFormatter
+                # For now, use its direct output. StockFormatter would handle label encoding.
+                df['market_regime'] = regime_output 
+                logger.info(f"===== FeatureEngineer: Market regime detection complete. Added one-hot encoded regime features. Shape after: {df.shape} =====") # Log needs update, not one-hot yet
+            except Exception as e:
+                logger.error(f"===== FeatureEngineer: Error during market regime detection: {e}. Stack trace: {traceback.format_exc()} Skipping market_regime. =====")
+                df['market_regime'] = 0 # Default or NaN
+
+        # Trading Signal (Categorical) - Placeholder, as logic is undefined from StockFormatter
+        if 'trading_signal' in self.feature_columns:
+            logger.warning("===== FeatureEngineer: 'trading_signal' feature is defined in StockFormatter but generation logic is not implemented here. Adding as NaN/0. =====")
+            df['trading_signal'] = 0 # Placeholder, assumes 0 is a valid category or will be handled
+
+        # Static ID Placeholder (Static)
+        if 'static_id_placeholder' in self.feature_columns:
+            # This should be a constant for the given symbol.
+            # StockFormatter would use LabelEncoder. The actual value might not matter as much as its consistency.
+            # If symbol is 'TSLA', placeholder could be hash('TSLA') % N_CATEGORIES or a fixed int.
+            # For now, a simple approach. This needs to align with how StockFormatter creates it.
+            # If no symbol provided, this feature might be problematic.
+            df['static_id_placeholder'] = hash(symbol if symbol else 'UNKNOWN_SYMBOL') % 1000 # Example placeholder
+        
+        # Store all generated numeric feature column names before any selection/PCA
+        # This should include all OBSERVED and numerical representation of CATEGORICAL/STATIC after processing
+        # For now, select columns that are likely numeric or will be made numeric.
+        # StockFormatter handles label encoding for categoricals.
+        # We are producing the raw features here.
+        
+        # Select only the columns that are part of self.feature_columns definition to ensure correct feature set
+        # and order (though order will be finalized later).
+        current_feature_cols = [col for col in self.feature_columns if col in df.columns]
+        df = df[current_feature_cols].copy() # Ensure only defined features are kept
+
+        # Re-evaluate self.feature_columns based on what was actually calculable and defined.
+        self.feature_columns = df.columns.tolist() # Update to actual generated columns
+        
+        # Log identified numeric features from the dataframe
+        numeric_cols_df = df.select_dtypes(include=np.number).columns.tolist()
+        logger.info(f"===== FeatureEngineer: Identified {len(numeric_cols_df)} numeric feature columns after TA and regime: {numeric_cols_df[:5]}... =====")
+
+        # Handle NaNs - This is critical
+        # StockFormatter might have its own way (e.g. ffill during sequence creation).
+        # For TA calculation, NaNs at the beginning are normal due to lookback.
+        # The warning should be about NaNs in the *final sequence* if they persist.
+        nan_rows_initial = df.isnull().any(axis=1).sum()
+        if nan_rows_initial > 0:
+            logger.warning(f"===== FeatureEngineer: Data has {nan_rows_initial} rows with NaNs after TA calculation (total rows: {len(df)}). This is common due to lookback periods of indicators. =====")
+
+        # If fitting scalers, we might drop initial NaNs.
+        # If for prediction, we need to be careful as the last row is most important.
+        if fit_scalers:
+            # Drop rows with any NaNs if fitting scalers, as they can't be used for fitting.
+            # This assumes that sufficient data is provided so that after dropping initial NaNs,
+            # there's still enough data to fit scalers robustly.
+            df.dropna(inplace=True) # StockFormatter might have specific NaN handling
+            logger.info(f"===== FeatureEngineer: Dropped {nan_rows_initial - df.isnull().any(axis=1).sum()} rows with NaNs because fit_scalers=True. Shape after drop: {df.shape}. =====")
+            if df.empty and nan_rows_initial > 0: # All rows were NaN
+                 logger.error(f"===== FeatureEngineer: All rows contained NaNs after TA calculation and fit_scalers=True. Cannot proceed for symbol '{symbol}'. Check input data length and TA lookback periods. =====")
+                 return None, last_close_price
+
+
+        # Final check on feature columns
+        self.feature_columns = df.columns.tolist() # Update based on current df state
+
+        logger.info(f"===== FeatureEngineer: Technical indicators and other StockFormatter-based features calculation complete. DataFrame shape is now {df.shape}. Last close: {last_close_price} =====")
         return df, last_close_price
 
     def fit_scaler(self, data: pd.DataFrame, symbol: Optional[str] = None):
-        """Fits the scaler (RobustScaler) on the provided data."""
+        """Fits the scaler (StandardScaler) on the provided data."""
         if data.empty:
             logger.error("===== FeatureEngineer: Cannot fit scaler with empty data. =====")
             raise ScalerHandlerError("Cannot fit scaler with empty data.")
@@ -409,49 +565,49 @@ class FeatureEngineer:
             logger.error(f"===== FeatureEngineer: No valid feature columns (from self.feature_columns or numeric_cols) found in the provided data for symbol '{symbol}'. Data columns: {data.columns.tolist()}. =====")
             raise ScalerHandlerError(f"No columns to scale for {symbol}")
 
-        logger.info(f"===== FeatureEngineer: Fitting the data scaler (RobustScaler) using {len(cols_to_scale)} identified feature columns for symbol '{symbol if symbol else 'global'}'. Columns: {cols_to_scale[:5]}... This learns the centering and scaling parameters. =====")
+        logger.info(f"===== FeatureEngineer: Fitting the data scaler (StandardScaler) using {len(cols_to_scale)} identified feature columns for symbol '{symbol if symbol else 'global'}'. Columns: {cols_to_scale[:5]}... This learns the centering and scaling parameters. =====")
         
-        scaler = RobustScaler()
+        scaler = StandardScaler()
         try:
             scaler.fit(data[cols_to_scale])
-            logger.info(f"===== FeatureEngineer: Scaler fitting complete. Center values (medians): {scaler.center_[:3]}... Scale values (IQRs): {scaler.scale_[:3]}... =====")
+            logger.info(f"===== FeatureEngineer: Scaler fitting complete. Mean sample: {scaler.mean_[:3]}... Scale (std) sample: {scaler.scale_[:3]}... =====")
 
-            # Store target-specific scaling parameters before it's scaled with other features
+            # Store scaling parameters for the target column specifically for inverse transformation
             if self.target_column_name in cols_to_scale:
-                target_idx = cols_to_scale.index(self.target_column_name)
-                center_val = scaler.center_[target_idx]
-                scale_val = scaler.scale_[target_idx]
-                if scale_val == 0:
-                    logger.warning(f"===== FeatureEngineer: Target column '{self.target_column_name}' has a scale (IQR) of 0 for symbol '{symbol}'. This will cause issues with scaling/unscaling. Investigate data. Using scale=1 as fallback. =====")
-                    scale_val = 1.0 # Avoid division by zero, though this indicates data issues
+                target_col_idx = cols_to_scale.index(self.target_column_name)
+                target_mean = scaler.mean_[target_col_idx]
+                target_scale = scaler.scale_[target_col_idx]
                 
-                target_params = {'center': center_val, 'scale': scale_val}
+                if target_scale == 0:
+                    logger.warning(f"===== FeatureEngineer: Target column '{self.target_column_name}' has zero standard deviation for symbol '{symbol if symbol else 'global'}'. Inverse transform might be problematic. Mean: {target_mean} =====")
+                    # Avoid division by zero, store scale as 1 if it's 0.
+                    # Or handle this case more gracefully (e.g. no scaling for this feature).
+                    # For now, using 1.0 to prevent NaN/inf in inverse transform if it occurs.
+                    target_scale = 1.0
+
+
+                target_params = {'center': target_mean, 'scale': target_scale} # 'center' is mean, 'scale' is std for StandardScaler
+                
                 if symbol:
                     self.target_scaler_params[symbol] = target_params
-                    logger.info(f"===== FeatureEngineer: Stored specific scaling parameters for target column '{self.target_column_name}' for symbol '{symbol}': Center={center_val:.2f}, Scale={scale_val:.2f} =====")
+                    logger.info(f"===== FeatureEngineer: Stored specific scaling parameters for target column '{self.target_column_name}' for symbol '{symbol}': Center(mean)={target_mean:.2f}, Scale(std)={target_scale:.2f} =====")
                 else:
                     self.global_target_scaler_params = target_params
-                    logger.info(f"===== FeatureEngineer: Stored global scaling parameters for target column '{self.target_column_name}': Center={center_val:.2f}, Scale={scale_val:.2f} =====")
+                    logger.info(f"===== FeatureEngineer: Stored global specific scaling parameters for target column '{self.target_column_name}': Center(mean)={target_mean:.2f}, Scale(std)={target_scale:.2f} =====")
             else:
-                logger.warning(f"===== FeatureEngineer: Target column '{self.target_column_name}' not found in columns to scale: {cols_to_scale}. Cannot store target-specific scaler params. =====")
-
-            # Store the fitted scaler
-            if symbol:
-                self.scalers[symbol] = scaler
-                logger.info(f"===== FeatureEngineer: Scaler for symbol '{symbol}' has been fitted and stored. =====")
-            else:
-                self.global_scaler = scaler
-                logger.info("===== FeatureEngineer: Global scaler has been fitted and stored. =====")
+                logger.warning(f"===== FeatureEngineer: Target column '{self.target_column_name}' not found in columns to scale: {cols_to_scale}. Cannot store its specific scaling parameters. Available numeric features: {df[cols_to_scale].columns.tolist()} =====")
 
         except ValueError as e:
-            logger.error(f"===== FeatureEngineer: ValueError during scaler fitting for '{symbol if symbol else 'global'}': {e}. This might be due to all-NaN columns or incompatible data. Data shape: {data[cols_to_scale].shape}. NaN counts per column:\n{data[cols_to_scale].isnull().sum()} =====")
-            raise ScalerHandlerError(f"ValueError during scaler fitting: {e}") from e
-        except Exception as e:
-            logger.error(f"===== FeatureEngineer: Unexpected error during scaler fitting for '{symbol if symbol else 'global'}': {e} =====")
-            raise ScalerHandlerError(f"Unexpected error during scaler fitting: {e}") from e
+            logger.error(f"===== FeatureEngineer: ValueError during scaler fitting for symbol '{symbol if symbol else 'global'}': {e}. This might happen if data contains all NaNs or is not numeric. Input shape: {data[cols_to_scale].shape} =====")
+            # Potentially re-raise or handle as a critical error
+            # raise ScalerHandlerError(f"Scaler fitting failed for {symbol}: {e}") from e # If ScalerHandlerError is appropriate
+            return # Exit if fitting fails
+            
+        logger.info(f"===== FeatureEngineer: Scaler fitting complete for symbol '{symbol if symbol else 'global'}'. =====")
+
 
     def normalize_features(self, data: pd.DataFrame, symbol: Optional[str] = None, fit: bool = False) -> Optional[pd.DataFrame]:
-        """Normalizes features using a fitted RobustScaler."""
+        """Normalizes features using a fitted StandardScaler."""
         if data.empty:
             logger.warning("===== FeatureEngineer: Data for normalization is empty. Symbol: {symbol}. Returning None. =====")
             return None
@@ -486,7 +642,7 @@ class FeatureEngineer:
             logger.warning(f"===== FeatureEngineer: No numeric columns found or matching self.feature_columns in data for normalization. Symbol: {symbol}. Data columns: {data.columns.tolist()} =====")
             return data # Return original data if no columns to scale
 
-        logger.info(f"===== FeatureEngineer: Normalizing {len(cols_to_scale)} features for symbol '{symbol if symbol else 'global'}' using RobustScaler. Columns: {cols_to_scale[:5]}... Data shape before scaling: {data.shape} =====")
+        logger.info(f"===== FeatureEngineer: Normalizing {len(cols_to_scale)} features for symbol '{symbol if symbol else 'global'}' using StandardScaler. Columns: {cols_to_scale[:5]}... Data shape before scaling: {data.shape} =====")
         
         data_to_scale = data[cols_to_scale]
         
@@ -494,7 +650,7 @@ class FeatureEngineer:
         if data_to_scale.isnull().all().any():
             all_nan_cols = data_to_scale.columns[data_to_scale.isnull().all()].tolist()
             logger.warning(f"===== FeatureEngineer: One or more columns are all NaN before scaling for symbol '{symbol}': {all_nan_cols}. These will remain NaN. =====")
-            # Scaler might handle this or raise error. RobustScaler should be okay if NaNs are consistent.
+            # Scaler might handle this or raise error. StandardScaler should be okay if NaNs are consistent.
 
         try:
             scaled_values = scaler.transform(data_to_scale)
@@ -531,384 +687,529 @@ class FeatureEngineer:
             logger.warning(f"===== FeatureEngineer: No target scaler parameters found for symbol '{symbol if symbol else 'global'}'. Cannot inverse transform. Returning scaled value. =====")
             return scaled_value
 
-        center = target_params['center']
-        scale = target_params['scale']
-        
+        # For StandardScaler: original = (scaled * scale) + center
+        # 'center' is mean, 'scale' is std
+        center = target_params.get('center') 
+        scale = target_params.get('scale')
+
+        if center is None or scale is None:
+            logger.warning(f"===== FeatureEngineer: Target scaler parameters 'center' or 'scale' are missing for '{symbol if symbol else 'global'}'. Params: {target_params}. Returning scaled value. =====")
+            return scaled_value
+            
         if scale == 0:
-            logger.warning(f"===== FeatureEngineer: Target scaler 'scale' is 0 for symbol '{symbol if symbol else 'global'}'. Cannot inverse transform properly. Returning center value. =====")
-            return center # Or raise error, as this indicates an issue with data/scaling
+            logger.warning(f"===== FeatureEngineer: Target scaler 'scale' (std) is zero for '{symbol if symbol else 'global'}'. Inverse transform will only return the 'center' (mean). Returning {center}. =====")
+            # If scale is 0, all original values were the same (the mean).
+            # So, inverse transform should ideally return the mean.
+            if isinstance(scaled_value, np.ndarray):
+                return np.full_like(scaled_value, center)
+            return center
 
         original_value = (scaled_value * scale) + center
-        logger.debug(f"===== FeatureEngineer: Inverse transformed target for symbol '{symbol if symbol else 'global'}': scaled={scaled_value:.4f}, original={original_value:.4f} (center={center:.2f}, scale={scale:.2f}) =====")
+        logger.debug(f"===== FeatureEngineer: Inverse transformed target for '{symbol if symbol else 'global'}'. Scaled: {scaled_value}, Center(Mean): {center}, Scale(Std): {scale}, Original: {original_value} =====")
         return original_value
 
-    def apply_feature_selection(self, data: pd.DataFrame) -> pd.DataFrame:
-        """Applies feature selection if enabled."""
-        if not self.use_feature_selection:
-            logger.info("===== FeatureEngineer: Feature selection is disabled. Using all available features. =====")
-            self.selected_features = self.feature_columns # Use all if not selecting
+    def apply_feature_selection(self, data: pd.DataFrame, target: pd.Series) -> pd.DataFrame:
+        """
+        Applies feature selection to the data.
+        Assumes 'data' contains only numeric features and 'target' is the series to predict.
+        Updates self.selected_features.
+        """
+        if not self.use_feature_selection or self.feature_selector is None:
+            logger.info("===== FeatureEngineer: Feature selection is disabled or selector not initialized. Returning all features. =====")
+            # If not selecting, all current numeric columns in 'data' are considered "selected"
+            self.selected_features = data.columns.tolist() 
             return data
 
-        if data.empty or self.feature_columns is None:
-            logger.warning("===== FeatureEngineer: Data is empty or base feature_columns not set. Skipping feature selection. =====")
-            return data
-        
-        # Example: Select top K features based on correlation with a shifted target
-        # This is a very basic example. More sophisticated methods (e.g., RFE, SelectFromModel) can be used.
-        # Ensure target column is present for correlation calculation
-        if self.target_column_name not in data.columns:
-            logger.warning(f"===== FeatureEngineer: Target column '{self.target_column_name}' not in data for feature selection. Skipping. =====")
-            self.selected_features = self.feature_columns
-            return data
-
-        # Shift target for correlation (predict next step)
-        # Ensure we have enough data points after shifting to calculate correlation robustly.
-        # If data is short, correlation might be noisy or fail.
-        if len(data) < self.prediction_horizon + 5: # Need at least a few points post-shift
-            logger.warning(f"===== FeatureEngineer: Not enough data (len: {len(data)}) to reliably perform correlation-based feature selection with horizon {self.prediction_horizon}. Skipping selection. =====")
-            self.selected_features = self.feature_columns
+        if data.empty:
+            logger.warning("===== FeatureEngineer: Input data for feature selection is empty. Cannot select features. =====")
+            self.selected_features = []
             return data
             
-        shifted_target = data[self.target_column_name].shift(-self.prediction_horizon)
-        
-        # Consider only feature columns that are numeric and not the target itself for correlation
-        features_for_corr = [col for col in self.feature_columns if col in data.columns and col != self.target_column_name and pd.api.types.is_numeric_dtype(data[col])]
-        if not features_for_corr:
-            logger.warning("===== FeatureEngineer: No valid numeric features found for correlation-based selection. Skipping. =====")
-            self.selected_features = self.feature_columns
+        if target.empty:
+            logger.warning("===== FeatureEngineer: Target data for feature selection is empty. Cannot select features. =====")
+            self.selected_features = data.columns.tolist() # Return all features from data
             return data
 
-        correlations = data[features_for_corr].corrwith(shifted_target).abs().sort_values(ascending=False)
-        
-        # Select top N features (e.g., N=10 or based on a threshold)
-        num_top_features = min(15, len(features_for_corr)) # Example: cap at 15 features
-        self.selected_features = correlations.head(num_top_features).index.tolist()
-        
-        if not self.selected_features:
-            logger.warning("===== FeatureEngineer: No features selected by correlation. Using all original features. =====")
-            self.selected_features = self.feature_columns
+        if len(data) != len(target):
+            logger.error(f"===== FeatureEngineer: Data ({len(data)}) and target ({len(target)}) lengths mismatch for feature selection. Cannot select. =====")
+            self.selected_features = data.columns.tolist()
+            return data
+            
+        # Ensure data and target are aligned and have no NaNs for f_regression
+        combined = pd.concat([data, target.rename('__TARGET__')], axis=1).dropna()
+        if combined.empty:
+            logger.error("===== FeatureEngineer: Data after dropna (for feature selection) is empty. Cannot select features. =====")
+            self.selected_features = data.columns.tolist()
             return data
 
-        # Always include the original target column if it was part of feature_columns, 
-        # even if not selected by correlation, as it might be needed for scaling or sequence creation later.
-        # However, for model input, target is usually handled separately.
-        # For now, selected_features are just the chosen input features.
+        data_clean = combined.drop(columns=['__TARGET__'])
+        target_clean = combined['__TARGET__']
 
-        logger.info(f"===== FeatureEngineer: Feature selection applied. Selected {len(self.selected_features)} features: {self.selected_features[:5]}... based on correlation with target. =====")
-        
-        # Return data with only selected features + target (if it was there initially)
-        # The actual subsetting for model input happens later in sequence creation.
-        # This method primarily determines `self.selected_features`.
-        # For consistency, if called, it should return a DataFrame with *only* selected features.
-        # However, typically, the full df with all TAs is passed around, and `self.selected_features` list is used later.
-        # Let's clarify: this method should determine `self.selected_features` and then `prepare_prediction_input` should use it.
-        # It doesn't need to return a subset of `data` here if downstream uses `self.selected_features`.
-        # For now, let it just set `self.selected_features`.
-        return data # Return the full data, selection is via the list `self.selected_features`
+        if data_clean.empty: # All rows might have had NaNs in target or data
+            logger.error("===== FeatureEngineer: Data (features part) after dropna (for feature selection) is empty. Cannot select features. =====")
+            self.selected_features = data.columns.tolist() # Fallback to original data columns if data_clean is empty.
+            return data
+
+
+        try:
+            # Adjust k for SelectKBest if n_features > number of available features
+            num_available_features = data_clean.shape[1]
+            current_k = self.feature_selector.k
+            if current_k == 'all': # if k was set to 'all'
+                 effective_k = num_available_features
+            elif isinstance(current_k, int) and current_k > num_available_features:
+                logger.warning(f"===== FeatureEngineer: Requested k={current_k} for SelectKBest is more than available features ({num_available_features}). Setting k to {num_available_features}. =====")
+                self.feature_selector.k = num_available_features # Temporarily adjust k
+                effective_k = num_available_features
+            else:
+                 effective_k = current_k if isinstance(current_k, int) else num_available_features
+
+
+            if effective_k == 0 and num_available_features > 0: # If k became 0 but features exist
+                logger.warning(f"===== FeatureEngineer: Effective k for SelectKBest is 0, but {num_available_features} features are available. Defaulting to select all available. =====")
+                self.feature_selector.k = num_available_features
+            elif num_available_features == 0 : # No features to select from
+                 logger.error("===== FeatureEngineer: No features available to perform feature selection. Returning empty DataFrame. =====")
+                 self.selected_features = []
+                 return pd.DataFrame(index=data.index)
+
+
+            self.feature_selector.fit(data_clean, target_clean)
+            self.selected_features = data_clean.columns[self.feature_selector.get_support()].tolist()
+            
+            # Restore original k if it was changed
+            if isinstance(current_k, int) and current_k != self.feature_selector.k :
+                 self.feature_selector.k = current_k
+
+
+            if not self.selected_features: # If somehow list is empty but shouldn't be
+                logger.warning("===== FeatureEngineer: Feature selection resulted in an empty list of features, but expected some. Defaulting to all original features. =====")
+                self.selected_features = data.columns.tolist()
+                return data
+
+
+            logger.info(f"===== FeatureEngineer: Feature selection applied. Selected {len(self.selected_features)} features: {self.selected_features[:5]}... based on correlation with target. =====")
+            return data[self.selected_features].copy() # Return only selected features from original data (before NaN drop for combined)
+            
+        except Exception as e:
+            logger.error(f"===== FeatureEngineer: Error during feature selection: {e}. Stack trace: {traceback.format_exc()} Returning all features. =====")
+            self.selected_features = data.columns.tolist() # Fallback to all features from original data
+            return data
+
 
     def apply_pca(self, data: pd.DataFrame, symbol: Optional[str] = None, fit: bool = False) -> pd.DataFrame:
         """Applies PCA if enabled."""
-        if not self.use_pca:
-            logger.info("===== FeatureEngineer: PCA is disabled. =====")
-            return data
-        
-        features_to_use = self.selected_features if self.selected_features else self.feature_columns
-        if not features_to_use:
-            logger.warning("===== FeatureEngineer: No features available for PCA. Skipping. =====")
-            return data
-        
-        # Ensure features_to_use are present in the data
-        features_present = [f for f in features_to_use if f in data.columns]
-        if not features_present:
-            logger.warning(f"===== FeatureEngineer: None of the designated PCA features ({features_to_use}) are in the data. Skipping PCA. =====")
-            return data
-        
-        data_for_pca = data[features_present].copy()
-        # PCA requires no NaNs
-        if data_for_pca.isnull().values.any():
-            logger.warning(f"===== FeatureEngineer: Data for PCA for symbol '{symbol}' contains NaNs. Attempting ffill then bfill. Shape: {data_for_pca.shape}, NaN sum:\n{data_for_pca.isnull().sum()[data_for_pca.isnull().sum() > 0]} =====")
-            data_for_pca.ffill(inplace=True)
-            data_for_pca.bfill(inplace=True)
-            if data_for_pca.isnull().values.any():
-                all_nan_cols_pca = data_for_pca.columns[data_for_pca.isnull().all()].tolist()
-                logger.error(f"===== FeatureEngineer: Data for PCA for symbol '{symbol}' still contains NaNs after fill in columns: {all_nan_cols_pca}. Cannot apply PCA. Original NaN sum:\n{data[features_present].isnull().sum()[data[features_present].isnull().sum() > 0]} =====")
-                # Drop all-NaN columns if they are the cause
-                if all_nan_cols_pca:
-                    data_for_pca.drop(columns=all_nan_cols_pca, inplace=True)
-                    features_present = [f for f in features_present if f not in all_nan_cols_pca]
-                    if not features_present:
-                        logger.error(f"===== FeatureEngineer: No features left for PCA for symbol '{symbol}' after dropping all-NaN columns. =====")
-                        return data # Return original data
-                if data_for_pca.isnull().values.any(): # Check again
-                    logger.error(f"===== FeatureEngineer: PCA cannot proceed with NaNs for symbol '{symbol}'. Returning data without PCA. =====")
-                    return data # Return original data
-        
-        if data_for_pca.empty:
-            logger.warning(f"===== FeatureEngineer: Data for PCA for symbol '{symbol}' is empty. Skipping PCA. =====")
+        if not self.use_pca or self.pca is None:
+            logger.info("===== FeatureEngineer: PCA is disabled or PCA model not initialized. Returning data as is. =====")
             return data
 
-        n_components = min(0.95, len(features_present)) # Keep 95% variance or max possible components
-        if isinstance(n_components, float) and n_components < 1.0 and int(n_components * len(features_present)) == 0:
-            # If 95% variance leads to 0 components (e.g. very few features), set to 1 component.
-             n_components = 1
-        elif isinstance(n_components, int) and n_components == 0:
-            n_components = 1
+        if data.empty:
+            logger.warning("===== FeatureEngineer: Input data for PCA is empty. Cannot apply PCA. =====")
+            return data
+            
+        # Ensure data is numeric and has no NaNs for PCA
+        data_numeric = data.select_dtypes(include=np.number)
+        if data_numeric.isnull().values.any():
+            logger.warning("===== FeatureEngineer: Data for PCA contains NaNs. Applying forward-fill and back-fill before PCA. =====")
+            data_numeric = data_numeric.ffill().bfill()
+            # If NaNs still exist (e.g., all-NaN column), PCA might fail or produce NaNs.
+            # PCA itself can handle NaNs if the underlying sklearn version supports it, or one can use an imputer.
+            # For simplicity here, we assume ffill/bfill is sufficient or PCA handles it.
+            if data_numeric.isnull().values.any():
+                 logger.error("===== FeatureEngineer: Data for PCA still contains NaNs after ffill/bfill. PCA might produce unexpected results or fail. =====")
+                 # Create list of columns that are still all NaN
+                 all_nan_cols = data_numeric.columns[data_numeric.isnull().all()].tolist()
+                 if all_nan_cols:
+                     logger.warning(f"===== FeatureEngineer: Columns entirely NaN before PCA: {all_nan_cols}. These will likely cause issues or be handled by PCA internally. =====")
+                     # Consider dropping all-NaN columns before PCA, though it changes the feature set.
+                     # data_numeric = data_numeric.dropna(axis=1, how='all')
 
+
+        if data_numeric.empty:
+            logger.warning("===== FeatureEngineer: No numeric data available after pre-processing for PCA. Cannot apply PCA. =====")
+            return data # Return original data (which might include non-numeric columns)
+
+
+        pca_model_to_use: Optional[PCA] = None
+        
         if fit:
-            logger.info(f"===== FeatureEngineer: Fitting PCA for symbol '{symbol if symbol else 'global'}' on {len(features_present)} features with n_components={n_components}. Data shape: {data_for_pca.shape} =====")
-            pca = PCA(n_components=n_components)
-            pca.fit(data_for_pca)
-            if symbol:
-                self.pca_models[symbol] = pca
-            else:
-                self.global_pca_model = pca
-            logger.info(f"===== FeatureEngineer: PCA fitted. Explained variance ratio: {pca.explained_variance_ratio_}. Number of components: {pca.n_components_} =====")
-        else:
-            pca = self.pca_models.get(symbol, self.global_pca_model)
-            if pca is None:
-                logger.warning(f"===== FeatureEngineer: PCA model for '{symbol if symbol else 'global'}' not fitted. Skipping PCA transformation. Call with fit=True first. =====")
+            logger.info(f"===== FeatureEngineer: 'fit' is True for PCA. Fitting new PCA model for '{symbol if symbol else 'global'}'. Data shape: {data_numeric.shape} =====")
+            # Adjust n_components for PCA if it's larger than number of features
+            num_available_features = data_numeric.shape[1]
+            current_n_components = self.pca.n_components
+            
+            if isinstance(current_n_components, int) and current_n_components > num_available_features:
+                logger.warning(f"===== FeatureEngineer: Requested n_components={current_n_components} for PCA is more than available features ({num_available_features}). Setting n_components to {num_available_features}. =====")
+                self.pca.n_components = num_available_features
+            elif isinstance(current_n_components, float) and (0 < current_n_components <= 1.0): # Variance explained
+                pass # n_components is a ratio, fine
+            elif num_available_features == 0:
+                logger.error("===== FeatureEngineer: No features available to fit PCA model. Cannot apply PCA. =====")
                 return data
-        
+
+
+            if self.pca.n_components == 0 and num_available_features > 0 : # If it became 0 but shouldn't
+                 logger.warning(f"===== FeatureEngineer: PCA n_components is 0, but {num_available_features} features exist. Defaulting to min(n_samples, n_features). =====")
+                 # Let PCA decide n_components if it was set to 0 incorrectly. Or set to num_available_features.
+                 self.pca.n_components = None # Or min(data_numeric.shape[0], num_available_features)
+
+
+            try:
+                self.pca.fit(data_numeric)
+                if symbol:
+                    self.pca_models[symbol] = self.pca
+                else:
+                    self.global_pca_model = self.pca
+                pca_model_to_use = self.pca
+                logger.info(f"===== FeatureEngineer: Fitted PCA model for '{symbol if symbol else 'global'}'. Explained variance ratio by {pca_model_to_use.n_components_} components: {np.sum(pca_model_to_use.explained_variance_ratio_):.4f} =====")
+            except Exception as e:
+                logger.error(f"===== FeatureEngineer: Error fitting PCA for '{symbol if symbol else 'global'}': {e}. Stack trace: {traceback.format_exc()} Returning data without PCA. =====")
+                # Restore n_components if it was changed
+                if isinstance(current_n_components, int) and self.pca.n_components != current_n_components:
+                    self.pca.n_components = current_n_components
+                return data # Return original data if PCA fit fails
+            
+            # Restore n_components if it was changed and not a ratio
+            if isinstance(current_n_components, int) and self.pca.n_components != current_n_components:
+                self.pca.n_components = current_n_components
+
+        else: # Use existing PCA model
+            pca_model_to_use = self.pca_models.get(symbol) if symbol else self.global_pca_model
+            if pca_model_to_use is None:
+                logger.error(f"===== FeatureEngineer: PCA requested for '{symbol if symbol else 'global'}' but no PCA model is fitted or available, and 'fit' is False. Cannot apply PCA. =====")
+                # Fallback or raise error. For now, return data as is.
+                return data
+            try:
+                check_is_fitted(pca_model_to_use)
+                logger.info(f"===== FeatureEngineer: Using pre-fitted PCA model for '{symbol if symbol else 'global'}'. Expecting {pca_model_to_use.n_features_in_} input features, producing {pca_model_to_use.n_components_} components. =====")
+            except NotFittedError:
+                logger.error(f"===== FeatureEngineer: PCA model for '{symbol if symbol else 'global'}' found but reports NotFittedError. Cannot apply PCA. =====")
+                return data
+
+
         try:
-            transformed_data = pca.transform(data_for_pca)
-            pca_feature_names = [f'pca_comp_{i}' for i in range(transformed_data.shape[1])]
-            pca_df = pd.DataFrame(transformed_data, columns=pca_feature_names, index=data_for_pca.index)
+            # Check for feature count mismatch before transform
+            if pca_model_to_use.n_features_in_ != data_numeric.shape[1]:
+                logger.error(f"===== FeatureEngineer: PCA model expects {pca_model_to_use.n_features_in_} features, but input data has {data_numeric.shape[1]} numeric features. Cannot transform. Symbol: '{symbol if symbol else 'global'}'. =====")
+                logger.error(f"PCA model features: {pca_model_to_use.get_feature_names_out() if hasattr(pca_model_to_use, 'get_feature_names_out') else 'N/A'}\")
+                logger.error(f"Input numeric features: {data_numeric.columns.tolist()}\")
+                return data # Return original data if feature count mismatch
+
+
+            pca_result = pca_model_to_use.transform(data_numeric)
+            pca_feature_names = [f'pca_comp_{i}' for i in range(pca_result.shape[1])]
+            df_pca = pd.DataFrame(pca_result, index=data_numeric.index, columns=pca_feature_names)
             
-            # Replace original features with PCA components
-            data_after_pca = data.drop(columns=features_present, errors='ignore')
-            data_after_pca = pd.concat([data_after_pca, pca_df], axis=1)
+            # Combine with non-numeric features from original data if any
+            df_non_numeric = data.select_dtypes(exclude=np.number)
+            result_df = pd.concat([df_pca, df_non_numeric], axis=1)
             
-            # Update self.selected_features to reflect PCA components if PCA is used
-            # The target column should not be in here. Assume it's handled separately.
+            # Update self.selected_features if PCA is the last step modifying feature set
+            # This assumes if PCA is used, its outputs are the 'selected' features.
             self.selected_features = pca_feature_names 
-            logger.info(f"===== FeatureEngineer: PCA applied for '{symbol if symbol else 'global'}'. Transformed {len(features_present)} features into {pca.n_components_} components. Updated selected_features. Shape after PCA: {data_after_pca.shape} =====")
-            return data_after_pca
-        except NotFittedError:
-            logger.error(f"===== FeatureEngineer: PCA model for '{symbol if symbol else 'global'}' was not fitted before transform. This is a logic error. =====")
-            return data # Return original data
-        except ValueError as ve:
-            logger.error(f"===== FeatureEngineer: ValueError during PCA transform for '{symbol if symbol else 'global'}': {ve}. Check feature consistency. Data shape: {data_for_pca.shape}, PCA n_features_in: {pca.n_features_in_ if hasattr(pca, 'n_features_in_') else 'N/A'} =====")
-            return data
+
+            logger.info(f"===== FeatureEngineer: PCA applied. Data shape changed to {result_df.shape}. Number of PCA components: {pca_result.shape[1]}. =====")
+            return result_df
+            
         except Exception as e:
-            logger.error(f"===== FeatureEngineer: Unexpected error during PCA transform for '{symbol if symbol else 'global'}': {e} =====")
+            logger.error(f"===== FeatureEngineer: Error applying PCA transformation for '{symbol if symbol else 'global'}': {e}. Stack trace: {traceback.format_exc()} Returning data without PCA. =====")
             return data
+
 
     def create_sequences(self, data: pd.DataFrame, symbol: Optional[str] = None) -> Optional[np.ndarray]:
-        """Creates sequences from the processed data for model input."""
+        """
+        Creates sequences from the feature-engineered DataFrame.
+        Assumes 'data' contains the final set of features (e.g., after selection/PCA if used).
+        The features in 'data' should be numeric and scaled.
+        """
+        logger.info(f"===== FeatureEngineer: Creating final prediction sequence for symbol '{symbol if symbol else 'global'}'. Data shape for sequence creation: {data.shape}. =====")
+
         if data.empty:
-            logger.warning(f"===== FeatureEngineer: Data for sequence creation is empty. Symbol: {symbol}. Returning None. =====")
+            logger.error(f"===== FeatureEngineer: Data for sequence creation is empty for symbol '{symbol}'. Cannot create sequences. =====")
             return None
 
-        # Determine which features to use for sequencing
-        # Priority: self.selected_features (after PCA or selection) > self.feature_columns (all TAs) > all numeric
-        features_for_sequencing = []
-        if self.selected_features: # This would include PCA components if PCA was run
-            features_for_sequencing = [f for f in self.selected_features if f in data.columns and pd.api.types.is_numeric_dtype(data[f])]
-            logger.info(f"===== FeatureEngineer: Using self.selected_features ({len(features_for_sequencing)} numeric available in data) for creating sequences. Symbol: {symbol}. Selected features example: {features_for_sequencing[:5]}... =====")
-        elif self.feature_columns:
-            features_for_sequencing = [f for f in self.feature_columns if f in data.columns and pd.api.types.is_numeric_dtype(data[f])]
-            logger.info(f"===== FeatureEngineer: Using self.feature_columns ({len(features_for_sequencing)} numeric available in data) for creating sequences. Symbol: {symbol}. Feature columns example: {features_for_sequencing[:5]}... =====")
+        # Determine which features to use for sequencing.
+        # If feature selection or PCA was used, self.selected_features should hold the names.
+        # Otherwise, use all numeric columns from the input 'data'.
+        
+        features_for_sequencing: List[str] = []
+        
+        if self.use_pca and self.selected_features and all(s.startswith('pca_comp_') for s in self.selected_features):
+            logger.info(f"===== FeatureEngineer: Using {len(self.selected_features)} PCA components for creating sequences. Symbol: {symbol if symbol else 'global'}. PCA components: {self.selected_features[:5]}... =====")
+            features_for_sequencing = [col for col in self.selected_features if col in data.columns]
+        elif self.use_feature_selection and self.selected_features:
+            logger.info(f"===== FeatureEngineer: Using {len(self.selected_features)} pre-selected features for creating sequences. Symbol: {symbol if symbol else 'global'}. Selected features example: {self.selected_features[:5]}... =====")
+            features_for_sequencing = [col for col in self.selected_features if col in data.columns]
         else:
-            # Fallback: use all numeric columns if no specific feature set defined
-            features_for_sequencing = data.select_dtypes(include=np.number).columns.tolist()
-            logger.warning(f"===== FeatureEngineer: No specific feature set (selected_features or feature_columns) defined. Falling back to all {len(features_for_sequencing)} numeric columns in data for sequencing. Symbol: {symbol}. =====")
+            # Default to using all numeric columns from the provided data if no specific selection/PCA features are set
+            # This also implies that self.feature_columns (from TA step) might be broader.
+            # The 'data' input to this function should be the one that has undergone normalization.
+            numeric_cols_in_data = data.select_dtypes(include=np.number).columns.tolist()
+            if not numeric_cols_in_data:
+                 logger.error(f"===== FeatureEngineer: No numeric columns found in data for sequence creation for symbol '{symbol if symbol else 'global'}'. Columns: {data.columns.tolist()}. Cannot create sequences. =====")
+                 return None
+            
+            logger.info(f"===== FeatureEngineer: Using all {len(numeric_cols_in_data)} available numeric features in input data for creating sequences as no specific selection/PCA features were previously finalized. Symbol: {symbol if symbol else 'global'}. Features example: {numeric_cols_in_data[:5]}... =====")
+            features_for_sequencing = numeric_cols_in_data
 
         if not features_for_sequencing:
-            logger.error(f"===== FeatureEngineer: No numeric features available in data to create sequences. Symbol: {symbol}. Data columns: {data.columns.tolist()}. Returning None. =====")
+            logger.error(f"===== FeatureEngineer: No features identified for sequencing for symbol '{symbol if symbol else 'global'}'. Cannot create sequences. self.selected_features: {self.selected_features}, PCA: {self.use_pca}, FeatureSelection: {self.use_feature_selection} =====")
             return None
-        
-        # Ensure target is not accidentally in features_for_sequencing if it's handled separately by model
-        # Most models expect features (X) and target (y) separately.
-        # For TFT, target is usually part of the input dataframe but marked.
-        # For now, assume features_for_sequencing are all inputs X.
-        # If self.target_column_name is in features_for_sequencing, it will be part of the sequence.
-        # This is often desired for auto-regressive models or if TFT uses it as `time_varying_unknown_reals`.
-
-        # Check if data has enough rows for at least one sequence
-        if len(data) < self.sequence_length:
-            logger.warning(f"===== FeatureEngineer: Data length ({len(data)}) is less than sequence length ({self.sequence_length}) for symbol '{symbol}'. Cannot create sequences. Returning None. =====")
-            return None
-
-        logger.info(f"===== FeatureEngineer: Creating sequences using {len(features_for_sequencing)} features for symbol '{symbol}'. Input data shape: {data.shape}, Sequence length: {self.sequence_length}. Features: {features_for_sequencing[:5]}... =====")
-        
-        # Convert selected DataFrame columns to NumPy array for sequence creation
-        # Make sure to handle cases where some features might be all NaN after processing, though ideally handled earlier.
-        # data_subset_for_seq = data[features_for_sequencing]
-
-        # Ensure the DataFrame passed to SequencePreprocessor contains both features and the target column.
-        columns_for_preprocessor_input_df = list(set(features_for_sequencing + [self.target_column_name]))
-        # Ensure all these columns actually exist in the input `data` DataFrame to avoid KeyErrors
-        columns_for_preprocessor_input_df = [col for col in columns_for_preprocessor_input_df if col in data.columns]
-        
-        if not columns_for_preprocessor_input_df:
-            logger.error(f"===== FeatureEngineer: No columns (features + target) available in data for symbol '{symbol}' to pass to sequence preprocessor. Original features_for_sequencing: {features_for_sequencing}, target: {self.target_column_name}. Data columns: {data.columns.tolist()} =====")
-            return None
-
-        data_for_preprocessor = data[columns_for_preprocessor_input_df].copy() # Use a copy
-
-        # NaN handling for the preprocessor input data
-        if data_for_preprocessor.isnull().values.any():
-            nan_cols_in_preprocessor_data = data_for_preprocessor.columns[data_for_preprocessor.isnull().any()].tolist()
-            logger.warning(f"===== FeatureEngineer: Data for SequencePreprocessor for symbol '{symbol}' (shape {data_for_preprocessor.shape}) contains NaNs in columns: {nan_cols_in_preprocessor_data}. Attempting ffill then bfill. =====")
-            data_for_preprocessor.ffill(inplace=True)
-            data_for_preprocessor.bfill(inplace=True)
             
-            all_nan_cols_after_fill = data_for_preprocessor.columns[data_for_preprocessor.isnull().all()].tolist()
-            if all_nan_cols_after_fill:
-                logger.warning(f"===== FeatureEngineer: Columns {all_nan_cols_after_fill} are entirely NaN in data for SequencePreprocessor for symbol '{symbol}' AFTER fill. Dropping them. =====")
-                data_for_preprocessor.drop(columns=all_nan_cols_after_fill, inplace=True)
-                # If target column was dropped, this will fail later in preprocessor, which is fine (error will be more specific).
-                # Update features_for_sequencing if any of its columns were dropped.
-                features_for_sequencing = [f for f in features_for_sequencing if f in data_for_preprocessor.columns]
-                if not features_for_sequencing and self.target_column_name not in data_for_preprocessor.columns:
-                    logger.error(f"===== FeatureEngineer: Data for SequencePreprocessor became unusable for symbol '{symbol}' after dropping all-NaN columns (no features and no target). =====")
+        # Ensure all selected features are actually in the dataframe
+        missing_seq_features = [f for f in features_for_sequencing if f not in data.columns]
+        if missing_seq_features:
+            logger.error(f"===== FeatureEngineer: One or more features intended for sequencing are missing from the input data for symbol '{symbol if symbol else 'global'}': {missing_seq_features}. Available columns: {data.columns.tolist()}. Cannot create sequences. =====")
+            return None
+
+        data_for_sequence_creation = data[features_for_sequencing].copy()
+        
+        logger.info(f"===== FeatureEngineer: Creating sequences using {len(features_for_sequencing)} features for symbol '{symbol if symbol else 'global'}'. Input data shape: {data_for_sequence_creation.shape}, Num features: {len(features_for_sequencing)} =====")
+
+        # Handle NaNs in data for SequencePreprocessor
+        # SequencePreprocessor expects data with no NaNs in the features used.
+        # NaNs typically occur at the start of TA features due to lookback.
+        # If creating sequences for prediction, the *last* sequence is critical and must not have NaNs.
+        # If creating sequences for training/fitting, rows with NaNs are typically dropped.
+        
+        if data_for_sequence_creation.isnull().values.any():
+            nan_cols = data_for_sequence_creation.columns[data_for_sequence_creation.isnull().any()].tolist()
+            logger.warning(f"===== FeatureEngineer: Data for SequencePreprocessor for symbol '{symbol if symbol else 'global'}' (shape {data_for_sequence_creation.shape}) contains NaNs in columns: {nan_cols}. Attempting ffill then bfill. =====")
+            data_for_sequence_creation.ffill(inplace=True)
+            data_for_sequence_creation.bfill(inplace=True)
+
+            # Check if any columns are *still* all NaN (e.g., if entire column was NaN initially)
+            still_all_nan_cols = data_for_sequence_creation.columns[data_for_sequence_creation.isnull().all()].tolist()
+            if still_all_nan_cols:
+                logger.warning(f"===== FeatureEngineer: Columns {still_all_nan_cols} are entirely NaN in data for SequencePreprocessor for symbol '{symbol if symbol else 'global'}' AFTER fill. Dropping them. =====")
+                data_for_sequence_creation.drop(columns=still_all_nan_cols, inplace=True)
+                # Update features_for_sequencing list
+                features_for_sequencing = [f for f in features_for_sequencing if f not in still_all_nan_cols]
+                if not features_for_sequencing:
+                    logger.error(f"===== FeatureEngineer: No features left after dropping all-NaN columns for symbol '{symbol if symbol else 'global'}'. Cannot create sequences. =====")
                     return None
-
-            if data_for_preprocessor.isnull().values.any():
-                remaining_nan_cols = data_for_preprocessor.columns[data_for_preprocessor.isnull().any()].tolist()
-                logger.error(f"===== FeatureEngineer: Data for SequencePreprocessor for symbol '{symbol}' (shape {data_for_preprocessor.shape}) still has NaNs after fill and dropping all-NaN columns (cols: {remaining_nan_cols}). This might cause issues in SequencePreprocessor. =====")
-                # Proceeding, but SequencePreprocessor might raise error if target or critical features are NaN.
-
-        # The SequencePreprocessor.create_sequence method expects a DataFrame and feature_cols, and returns a dict.
-        sequence_dict = self.sequence_preprocessor.create_sequence(
-            df=data_for_preprocessor, 
-            feature_cols=features_for_sequencing, # Pass the original list of feature names
-            target_col=self.target_column_name # Assuming target_col is needed, though might not be used if only features are extracted
-        )
-        
-        if not sequence_dict or 'features' not in sequence_dict:
-            logger.error(f"===== FeatureEngineer: SequencePreprocessor.create_sequence did not return a valid dictionary with 'features' for symbol '{symbol}'. =====")
-            return None
             
-        sequences_np = sequence_dict['features']
-        
-        if sequences_np is None or sequences_np.size == 0:
-            logger.error(f"===== FeatureEngineer: SequencePreprocessor.create_sequence returned None or empty array for symbol '{symbol}'. Input data for seq was shape {data_for_preprocessor.shape}. =====")
+            if data_for_sequence_creation.isnull().values.any(): # Should not happen if bfill worked, unless df was too short
+                 logger.error(f"===== FeatureEngineer: NaNs STILL PRESENT in data for SequencePreprocessor for symbol '{symbol if symbol else 'global'}' even after ffill/bfill. This indicates insufficient data or persistent all-NaN columns not dropped. Shape: {data_for_sequence_creation.shape}. =====")
+
+
+        # SequencePreprocessor.create_sequences expects a NumPy array
+        try:
+            # The target argument in create_sequences is for training. For prediction, it's not strictly needed
+            # if we only care about the input sequence X.
+            # However, if SequencePreprocessor requires it, we might need to pass a dummy target.
+            # Let's assume for now it can handle target=None or a simplified version for prediction path.
+            # The current SequencePreprocessor does not seem to use 'target' in its create_sequences method.
+            
+            sequences_x, _ = self.sequence_preprocessor.create_sequences(
+                data_for_sequence_creation.to_numpy(), # Pass only the array of features
+                None # No target needed for unsupervised sequence generation for prediction
+            )
+
+            if sequences_x is None or sequences_x.shape[0] == 0:
+                logger.error(f"===== FeatureEngineer: Sequence creation resulted in no sequences for symbol '{symbol if symbol else 'global'}'. Input data shape was {data_for_sequence_creation.shape}. Sequence length {self.sequence_length}. =====")
+                return None
+
+            logger.info(f"===== FeatureEngineer: Sequences created successfully for symbol '{symbol if symbol else 'global'}'. Shape: {sequences_x.shape} (num_sequences, sequence_length, num_features). =====")
+            return sequences_x # Return all sequences (e.g., for backtesting or if model needs it)
+            
+        except Exception as e:
+            logger.error(f"===== FeatureEngineer: Error during sequence creation for symbol '{symbol if symbol else 'global'}': {e}. Stack trace: {traceback.format_exc()}. Input data shape to preprocessor: {data_for_sequence_creation.shape} =====")
             return None
 
-        logger.info(f"===== FeatureEngineer: Sequences created successfully for symbol '{symbol}'. Shape: {sequences_np.shape} (num_sequences, sequence_length, num_features). =====")
-        return sequences_np
 
     def prepare_features_for_prediction(self, raw_data: pd.DataFrame, symbol: Optional[str] = None) -> Tuple[Optional[np.ndarray], Optional[float]]:
         """
-        Prepares the final input features (as a NumPy array) for making a single prediction step.
-        This involves: TA calculation, normalization, feature selection (if any), PCA (if any),
-        and taking the *last* sequence of appropriate length.
-        Returns a tuple: (feature_sequence_for_prediction_np, last_close_price)
-        The feature_sequence_for_prediction_np is (sequence_length, num_features) for ONE prediction.
+        Orchestrates the full feature engineering pipeline for a single prediction pass.
+        1. Calculates Technical Indicators.
+        2. Normalizes features using a pre-fitted scaler.
+        3. Optionally applies feature selection or PCA using pre-fitted models/stats.
+        4. Creates the final input sequence for the model.
+
+        Args:
+            raw_data: DataFrame with raw market data (OHLCV).
+            symbol: The stock symbol for which features are being prepared.
+
+        Returns:
+            A tuple containing:
+                - np.ndarray: The final (single) sequence of features ready for model input,
+                              shape (sequence_length, num_features). Or None if error.
+                - float: The last actual close price from the raw_data. Or None if error.
         """
         logger.info(f"===== FeatureEngineer: Starting feature preparation pipeline for PREDICTION using input data of shape {raw_data.shape} for symbol '{symbol}'. Goal is to produce a single NumPy array sequence for the model. =====")
-        
+
         if raw_data.empty:
             logger.error(f"===== FeatureEngineer (predict): Raw data for symbol '{symbol}' is empty. Cannot prepare features. =====")
             return None, None
-        
-        # 1. Calculate Technical Indicators
+            
+        # Ensure enough data for sequence_length + TA lookbacks
+        # This check should ideally be more dynamic based on actual TAs calculated.
+        # For now, a simple check against sequence_length. Longest TA lookback is 200.
+        min_required_rows = self.sequence_length + 200 # A rough estimate, should be more precise
+        if len(raw_data) < self.sequence_length : # Basic check
+             logger.warning(f"===== FeatureEngineer (predict): Insufficient raw data rows ({len(raw_data)}) for symbol '{symbol}' to form a sequence of length {self.sequence_length}. Prediction might be compromised. (Min ideally {min_required_rows} for all TAs) =====\")
+             # If len(raw_data) < self.sequence_length, sequence creation will fail later.
+
+        # 1. Calculate Technical Indicators (and other StockFormatter features)
         logger.info(f"===== FeatureEngineer (predict): Calculating technical indicators for symbol '{symbol}'. Initial raw data shape: {raw_data.shape} =====")
-        df_with_ta, last_close_price = self.calculate_technical_indicators(raw_data, symbol=symbol, fit_scalers=False) # fit_scalers=False for prediction path
+        df_with_ta, last_close_price = self.calculate_technical_indicators(raw_data, symbol=symbol, fit_scalers=False)
+
         if df_with_ta is None or df_with_ta.empty:
-            logger.error(f"===== FeatureEngineer (predict): TA calculation failed or returned empty DataFrame for symbol '{symbol}'. Shape: {df_with_ta.shape if df_with_ta is not None else 'None'}. =====")
-            return None, last_close_price # last_close_price might be None already
+            logger.error(f"===== FeatureEngineer (predict): Failed to calculate technical indicators for symbol '{symbol}'. Raw data shape was {raw_data.shape}. =====")
+            return None, last_close_price # last_close_price might still be valid from initial check
+
         logger.info(f"===== FeatureEngineer (predict): Technical indicators added. Shape after TA for symbol '{symbol}': {df_with_ta.shape} =====")
 
-        # Handle NaNs: For prediction, we need the tail end of the data to be clean.
-        # If TA introduces NaNs at the beginning, that's usually fine as long as the last `sequence_length` rows are valid.
-        # Let's check the state of the last `sequence_length` rows before normalization.
-        if len(df_with_ta) >= self.sequence_length:
-            tail_for_check = df_with_ta.tail(self.sequence_length)
-            if tail_for_check.isnull().values.any():
-                nan_cols_in_tail = tail_for_check.columns[tail_for_check.isnull().any()].tolist()
-                logger.warning(f"===== FeatureEngineer (predict): NaNs found in the last {self.sequence_length} rows for symbol '{symbol}' (cols: {nan_cols_in_tail}) BEFORE normalization. Attempting ffill+bfill on df_with_ta. =====")
-                # Fill NaNs in the entire df_with_ta before normalization if tail has issues.
-                # This is aggressive but might save sequences if NaNs are sporadic.
-                df_with_ta.ffill(inplace=True)
-                df_with_ta.bfill(inplace=True)
-                # Re-check tail
-                tail_after_fill = df_with_ta.tail(self.sequence_length)
-                if tail_after_fill.isnull().values.any():
-                    still_nan_cols = tail_after_fill.columns[tail_after_fill.isnull().any()].tolist()
-                    logger.error(f"===== FeatureEngineer (predict): NaNs STILL PRESENT in the last {self.sequence_length} rows for symbol '{symbol}' (cols: {still_nan_cols}) after fill. Prediction will likely fail or be inaccurate. =====")
-                    # Proceeding, but this is a warning sign.
-        else:
-            logger.warning(f"===== FeatureEngineer (predict): Data length ({len(df_with_ta)}) after TA is less than sequence length ({self.sequence_length}) for symbol '{symbol}'. Cannot form a full sequence. =====")
-            # Return None if not enough data for even one sequence for prediction
-            return None, last_close_price
+        # Critical: Handle NaNs in the *last* `sequence_length` rows before normalization.
+        # These NaNs can break normalization or lead to NaN sequences.
+        # Particularly, NaNs from long-lookback TAs (like SMA200) if not enough history was fetched.
+        if df_with_ta.iloc[-self.sequence_length:].isnull().values.any():
+            nan_cols_in_seq = df_with_ta.columns[df_with_ta.iloc[-self.sequence_length:].isnull().any()].tolist()
+            logger.warning(f"===== FeatureEngineer (predict): CRITICAL - NaNs detected in the last {self.sequence_length} rows for symbol '{symbol}' (cols: {nan_cols_in_seq}) BEFORE normalization. Attempting ffill+bfill on df_with_ta. =====")
+            
+            # Create a copy for this operation to avoid modifying the original df_with_ta if it's used elsewhere or for debugging
+            df_filled_for_seq = df_with_ta.copy()
+            df_filled_for_seq.ffill(inplace=True)
+            df_filled_for_seq.bfill(inplace=True) # bfill after ffill to handle leading NaNs if any part of sequence was all NaN initially
 
-        # 2. Normalize Features
-        # Normalization should use the scaler fitted on historical training data.
-        logger.info(f"===== FeatureEngineer (predict): Normalizing features for symbol '{symbol}'. Data shape before norm: {df_with_ta.shape} =====")
-        df_normalized = self.normalize_features(df_with_ta, symbol=symbol, fit=False) # fit=False for prediction
+            if df_filled_for_seq.iloc[-self.sequence_length:].isnull().values.any():
+                still_nan_cols = df_filled_for_seq.columns[df_filled_for_seq.iloc[-self.sequence_length:].isnull().any()].tolist()
+                logger.error(f"===== FeatureEngineer (predict): NaNs STILL PRESENT in the last {self.sequence_length} rows for symbol '{symbol}' (cols: {still_nan_cols}) after fill. Prediction will likely fail or be inaccurate. =====")
+                # This is a critical issue. The model expects complete, scaled sequences.
+                # Depending on the model, this could be fatal.
+                # For now, we proceed with df_filled_for_seq, but this needs monitoring.
+            
+            df_to_normalize = df_filled_for_seq # Use the filled DataFrame for subsequent steps
+        else:
+            df_to_normalize = df_with_ta # No NaNs in the critical part, proceed
+
+        # 2. Normalize Features (using pre-fitted scaler for the symbol or global)
+        logger.info(f"===== FeatureEngineer (predict): Normalizing features for symbol '{symbol}'. Data shape before norm: {df_to_normalize.shape} =====")
+        df_normalized = self.normalize_features(df_to_normalize, symbol=symbol, fit=False) # fit=False is crucial for prediction
+
         if df_normalized is None or df_normalized.empty:
-            logger.error(f"===== FeatureEngineer (predict): Feature normalization failed or returned empty for symbol '{symbol}'. Shape: {df_normalized.shape if df_normalized is not None else 'None'}. =====")
+            logger.error(f"===== FeatureEngineer (predict): Feature normalization failed for symbol '{symbol}'. =====")
             return None, last_close_price
+        
         logger.info(f"===== FeatureEngineer (predict): Features normalized. Shape after normalization for symbol '{symbol}': {df_normalized.shape} =====")
 
-        # 3. Apply Feature Selection (determines `self.selected_features` list if enabled)
-        # This step doesn't usually change the DataFrame for prediction, but sets the list of features to use.
-        # It should ideally be done based on training set insights if not dynamic.
-        # For simplicity, if `use_feature_selection` is on, it might re-evaluate here, or rely on a pre-fitted selection.
-        # Assuming `apply_feature_selection` has been called appropriately during a training/setup phase
-        # and `self.selected_features` is set. If not, it might use all features.
+        df_for_processing = df_normalized # This is the dataframe to be used for selection/PCA/sequencing
+
+        # 3. Apply Feature Selection (optional, using pre-defined selected features)
+        # For prediction, we should use self.selected_features if it was determined during a 'fit' phase (e.g. on training data)
+        # The `apply_feature_selection` method expects a target, which is not available in prediction.
+        # So, we just subset the DataFrame if `self.selected_features` is populated.
+        
+        final_features_for_sequence: List[str] = []
+
         if self.use_feature_selection:
-            # Typically, for prediction, we don't re-run selection itself unless it's an adaptive method.
-            # We use the `self.selected_features` list that was determined during training/setup.
-            # If `self.selected_features` is None, it implies selection hasn't been done or all features are used.
-            if self.selected_features is None:
-                logger.warning(f"===== FeatureEngineer (predict): Feature selection is enabled for symbol '{symbol}', but no pre-selected features found (`self.selected_features` is None). Attempting to run selection now (might be inconsistent if not based on training data distribution). =====")
-                # Running it here might be okay if it's a static method or for testing, but generally, selection criteria are from training.
-                self.apply_feature_selection(df_normalized.copy()) # Use copy to avoid modifying df_normalized if selection changes it
-            
-            if self.selected_features:
-                 logger.info(f"===== FeatureEngineer (predict): Using pre-defined selected features ({len(self.selected_features)}) for symbol '{symbol}': {self.selected_features[:5]}... =====")
+            if self.selected_features is not None and self.selected_features:
+                logger.info(f"===== FeatureEngineer (predict): Using pre-defined selected features ({len(self.selected_features)}) for symbol '{symbol}': {self.selected_features[:5]}... =====")
+                # Ensure all selected features are present in the processed dataframe
+                missing_selected = [f for f in self.selected_features if f not in df_for_processing.columns]
+                if missing_selected:
+                    logger.error(f"===== FeatureEngineer (predict): Some pre-selected features are missing from the processed data for symbol '{symbol}': {missing_selected}. Available: {df_for_processing.columns.tolist()}. Will proceed with available intersection. =====")
+                    # Use only the intersection
+                    final_features_for_sequence = [f for f in self.selected_features if f in df_for_processing.columns]
+                    if not final_features_for_sequence:
+                         logger.error(f"===== FeatureEngineer (predict): No intersection between pre-selected features and available data columns for symbol '{symbol}'. Cannot proceed with feature selection logic. =====")
+                         # Fallback: use all numeric columns from df_for_processing
+                         final_features_for_sequence = df_for_processing.select_dtypes(include=np.number).columns.tolist()
+                else:
+                    final_features_for_sequence = self.selected_features
             else:
-                 logger.warning(f"===== FeatureEngineer (predict): Feature selection enabled for symbol '{symbol}', but `self.selected_features` is still None after attempt. Will use all numeric features. =====")
-        else:
-            logger.info(f"===== FeatureEngineer (predict): Feature selection is disabled for symbol '{symbol}'. All available numeric features will be considered for sequence. =====")
-            # Ensure self.selected_features is None or reflects all features if selection is off
-            # self.selected_features = None # Or self.feature_columns if that's the policy
+                logger.warning(f"===== FeatureEngineer (predict): Feature selection enabled for symbol '{symbol}', but no pre-selected features found (`self.selected_features` is None). Attempting to run selection now (might be inconsistent if not based on training data distribution). =====")
+                # This path is problematic for prediction if a target is needed.
+                # For now, if self.selected_features is None, it implies all (numeric) features are used.
+                # The self.apply_feature_selection needs a target, so we can't call it here directly.
+                # We should rely on self.selected_features being set during a training/fitting phase.
+                # Fallback: use all numeric columns from df_for_processing.
+                logger.warning(f"===== FeatureEngineer (predict): Falling back to using all available numeric features for symbol '{symbol}' as feature selection cannot be run without a target during prediction. =====")
+                final_features_for_sequence = df_for_processing.select_dtypes(include=np.number).columns.tolist()
 
-        # 4. Apply PCA (transforms data based on `self.selected_features` or `self.feature_columns`)
-        # PCA also relies on a fitted model from training data.
-        df_processed = df_normalized
-        if self.use_pca:
-            logger.info(f"===== FeatureEngineer (predict): Applying PCA for symbol '{symbol}'. Data shape before PCA: {df_processed.shape} =====")
-            df_processed = self.apply_pca(df_processed.copy(), symbol=symbol, fit=False) # fit=False for prediction
-            if df_processed is None or df_processed.empty:
-                 logger.error(f"===== FeatureEngineer (predict): PCA application failed or returned empty for symbol '{symbol}'. Shape: {df_processed.shape if df_processed is not None else 'None'}. =====")
-                 return None, last_close_price
-            logger.info(f"===== FeatureEngineer (predict): PCA applied. Shape after PCA for symbol '{symbol}': {df_processed.shape}. Selected features now PCA components. =====")
-            # self.selected_features should now be the PCA component names if PCA was successful.
+            df_selected = df_for_processing[final_features_for_sequence].copy()
+            logger.info(f"===== FeatureEngineer (predict): Shape after applying feature selection rules for symbol '{symbol}': {df_selected.shape} (using {len(final_features_for_sequence)} features) =====")
+        else: # No feature selection
+            df_selected = df_for_processing.copy()
+            final_features_for_sequence = df_selected.select_dtypes(include=np.number).columns.tolist() # All numeric features
+            logger.info(f"===== FeatureEngineer (predict): Feature selection disabled. Using all {len(final_features_for_sequence)} numeric features from processed data for symbol '{symbol}'. Shape: {df_selected.shape} =====")
+            
 
-        # 5. Create the final sequence for prediction from df_processed
-        # This should use the final set of features (e.g., PCA components if PCA was run, or selected original features)
-        # The `create_sequences` method uses `self.selected_features` or `self.feature_columns` internally.
-        
-        # Which columns to use for sequencing at this point:
-        # If PCA was used, self.selected_features = PCA components.
-        # If No PCA but selection, self.selected_features = selected original features.
-        # If No PCA and No selection, self.selected_features might be None or all original TAs (self.feature_columns).
-        
-        # `create_sequences` will pick the right set based on `self.selected_features` then `self.feature_columns`.
-        logger.info(f"===== FeatureEngineer (predict): Creating final prediction sequence for symbol '{symbol}'. Data shape for sequence creation: {df_processed.shape}. =====")
-        
-        # Create sequences from the *entire* processed history for this symbol.
-        # This might generate multiple sequences if df_processed is long enough.
-        all_sequences_np = self.create_sequences(df_processed, symbol=symbol)
-
-        if all_sequences_np is None or all_sequences_np.size == 0:
-            logger.error(f"===== FeatureEngineer (predict): Failed to create any sequences from processed data for symbol '{symbol}'. Shape of data fed to create_sequences: {df_processed.shape}. =====")
+        if df_selected.empty or not final_features_for_sequence:
+            logger.error(f"===== FeatureEngineer (predict): Dataframe became empty or no features selected after feature selection step for symbol '{symbol}'. Cannot proceed. =====")
             return None, last_close_price
-        
-        # For prediction, we need only the *last* available sequence.
-        # all_sequences_np is (num_sequences, sequence_length, num_features_in_sequence)
-        last_sequence_for_prediction_np = all_sequences_np[-1, :, :]
-        logger.info(f"===== FeatureEngineer (predict): Extracted the last sequence of length {self.sequence_length}. Final prediction input sequence shape for symbol '{symbol}': {last_sequence_for_prediction_np.shape}. Num features in seq: {last_sequence_for_prediction_np.shape[1]} =====")
 
-        # The number of features in `last_sequence_for_prediction_np` should match model's expectation.
-        # This is determined by `features_for_sequencing` logic within `create_sequences`.
+        # 4. Apply PCA (optional, using pre-fitted PCA model)
+        if self.use_pca:
+            logger.info(f"===== FeatureEngineer (predict): Applying PCA for symbol '{symbol}'. Data shape before PCA: {df_selected.shape} =====")
+            # `apply_pca` uses numeric columns. df_selected should already be mostly numeric.
+            df_pca = self.apply_pca(df_selected, symbol=symbol, fit=False) # fit=False is crucial
+            if df_pca is None or df_pca.empty:
+                logger.error(f"===== FeatureEngineer (predict): PCA application failed for symbol '{symbol}'. =====")
+                return None, last_close_price
+            
+            # After PCA, the columns are pca_comp_0, pca_comp_1, etc. These are the features for sequencing.
+            final_features_for_sequence = df_pca.select_dtypes(include=np.number).columns.tolist()
+            df_final_features = df_pca
+            logger.info(f"===== FeatureEngineer (predict): PCA applied. Data shape changed to {df_final_features.shape}. =====")
+        else: # No PCA
+            df_final_features = df_selected
+            # final_features_for_sequence is already set from the feature selection step (or all numerics if no selection)
+            logger.info(f"===== FeatureEngineer (predict): PCA disabled. Using features from previous step for symbol '{symbol}'. Shape: {df_final_features.shape} =====")
+            
+
+        if df_final_features.empty or not final_features_for_sequence:
+            logger.error(f"===== FeatureEngineer (predict): Dataframe became empty or no features selected after PCA/selection step for symbol '{symbol}'. Cannot proceed. =====")
+            return None, last_close_price
+            
+        # Ensure only the final set of features are passed for sequencing
+        df_for_sequence_input = df_final_features[final_features_for_sequence].copy()
+
+
+        # 5. Create Sequences
+        # This will generate all possible sequences from df_for_sequence_input.
+        # We then need to take the *last* one for prediction.
+        logger.info(f"===== FeatureEngineer (predict): Creating sequences from final features for symbol '{symbol}'. Data shape for sequencing: {df_for_sequence_input.shape}, Num features: {len(final_features_for_sequence)} =====")
         
-        # Return the single sequence (sequence_length, num_features) and the last known close price
-        return last_sequence_for_prediction_np, last_close_price
+        # Final check for NaNs in the data that goes into sequence creation, especially the last `sequence_length` rows.
+        # This should have been handled before normalization, but an extra check on `df_for_sequence_input`
+        if df_for_sequence_input.iloc[-self.sequence_length:].isnull().values.any():
+            nan_cols_final_seq = df_for_sequence_input.columns[df_for_sequence_input.iloc[-self.sequence_length:].isnull().any()].tolist()
+            logger.error(f"===== FeatureEngineer (predict): CRITICAL - NaNs detected in the last {self.sequence_length} rows of data JUST BEFORE sequence creation for symbol '{symbol}' (cols: {nan_cols_final_seq}). This will likely lead to a NaN sequence. Data shape: {df_for_sequence_input.shape}. =====")
+            # Attempt one last fill, though this indicates a deeper issue if NaNs persist till here.
+            df_for_sequence_input.ffill(inplace=True)
+            df_for_sequence_input.bfill(inplace=True)
+            if df_for_sequence_input.iloc[-self.sequence_length:].isnull().values.any():
+                 logger.error(f"===== FeatureEngineer (predict): CRITICAL - NaNs PERSIST after final fill for symbol '{symbol}'. =====")
+
+
+        all_sequences = self.create_sequences(df_for_sequence_input, symbol=symbol)
+
+        if all_sequences is None or all_sequences.shape[0] == 0:
+            logger.error(f"===== FeatureEngineer (predict): Failed to create any sequences from processed data for symbol '{symbol}'. Shape of data fed to create_sequences: {df_for_sequence_input.shape}. =====")
+            return None, last_close_price
+
+        # For prediction, we need only the *last* available sequence
+        last_sequence = all_sequences[-1, :, :] # Shape: (sequence_length, num_features)
+        
+        num_features_in_seq = last_sequence.shape[1]
+        expected_num_features = len(final_features_for_sequence)
+        
+        if num_features_in_seq != expected_num_features:
+            logger.warning(f"===== FeatureEngineer (predict): Mismatch in number of features in the final sequence for symbol '{symbol}'. Expected {expected_num_features} (from {final_features_for_sequence}), but got {num_features_in_seq}. This could be due to all-NaN columns being dropped during sequencing. =====")
+            # This could be an issue if the model expects a fixed number of features.
+            # The tft_predictor.py log showed "Keras expects: (30, 25)".
+            # We need to ensure the final sequence here matches that.
+
+        logger.info(f"===== FeatureEngineer (predict): Extracted the last sequence of length {self.sequence_length}. Final prediction input sequence shape for symbol '{symbol}': {last_sequence.shape}. Num features in seq: {num_features_in_seq} =====")
+        
+        # Final check for NaNs in the very last sequence passed to the model
+        if np.isnan(last_sequence).any():
+            logger.error(f"===== FeatureEngineer (predict): CRITICAL - The final prepared sequence for symbol '{symbol}' (shape {last_sequence.shape}) CONTAINS NaNs. Model prediction will likely fail or be highly inaccurate. =====")
+            # Example: np.argwhere(np.isnan(last_sequence)) could show where NaNs are.
+
+        return last_sequence, last_close_price
+
 
 if __name__ == "__main__":
     # Example usage
