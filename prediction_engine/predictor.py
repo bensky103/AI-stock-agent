@@ -353,7 +353,7 @@ class EnhancedStockPredictor:
                         self.logger.info(f"[{self.__class__.__name__}] Denormalizing the {len(scaled_predictions_array)} scaled prediction steps for {symbol}...")
                         for i, scaled_pred in enumerate(scaled_predictions_array):
                             if scaled_pred is not np.nan:
-                                denormalized_pred = self.feature_engineer.inverse_transform_target(scaled_pred)
+                                denormalized_pred = self.feature_engineer.inverse_transform_target(scaled_pred, symbol=symbol)
                                 denormalized_predictions_list.append(denormalized_pred)
                                 self.logger.info(f"  [{self.__class__.__name__}] Step T+{i+1} for {symbol}: Scaled = {scaled_pred:.4f} -> Denormalized = {denormalized_pred:.2f}")
                             else:
