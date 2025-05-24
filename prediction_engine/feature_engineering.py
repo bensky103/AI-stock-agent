@@ -13,6 +13,8 @@ import pytz
 from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.decomposition import PCA
 from sklearn.feature_selection import SelectKBest, f_regression
+from sklearn.utils.validation import check_is_fitted # For checking scaler status
+from sklearn.exceptions import NotFittedError # For catching scaler errors
 import ta
 import traceback # For logging exception tracebacks
 
@@ -22,6 +24,7 @@ from ta.momentum import RSIIndicator, StochasticOscillator # Assuming Stochastic
 from ta.volatility import BollingerBands, AverageTrueRange
 from ta.volume import VolumeWeightedAveragePrice, MFIIndicator # Assuming these might be used
 from .sequence_preprocessor import SequencePreprocessor
+from .scaler_handler import ScalerHandlerError # Import the custom error
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -153,7 +156,7 @@ class FeatureEngineer:
         self.detect_regime = detect_regime
         self.scalers: Dict[str, RobustScaler] = {} # Symbol -> Scaler
         self.global_scaler: Optional[RobustScaler] = None
-        self.target_scaler_params: Dict[str, Dict[str, float]] = {} # Symbol -> {'center': median, 'scale': iqr}
+        self.target_scaler_params: Dict[str, Dict[str, float]] = {} # Initialize as empty dict
         self.global_target_scaler_params: Optional[Dict[str, float]] = None
         self.pca_models: Dict[str, PCA] = {}
         self.global_pca_model: Optional[PCA] = None
