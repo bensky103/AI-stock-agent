@@ -191,7 +191,26 @@ class EnhancedStockPredictor:
                     predictions[symbol] = {"error": "No data available"}
                     continue
                 
-                self.logger.info(f"[{self.__class__.__name__}] Successfully fetched {latest_data_df.shape[0]} data points for {symbol}. Last available date: {latest_data_df.index[-1].strftime('%Y-%m-%d') if not latest_data_df.empty else 'N/A'}.")
+                last_available_date_str = 'N/A'
+                if not latest_data_df.empty:
+                    last_index_item = latest_data_df.index[-1]
+                    # market_feed._process_data for a single symbol in a list returns an index of (Symbol, Date)
+                    # So last_index_item would be like ('TSLA', TimestampObject)
+                    date_obj_to_format = None
+                    if isinstance(last_index_item, tuple) and len(last_index_item) == 2:
+                        date_obj_to_format = last_index_item[1] # Get the TimestampObject
+                    elif hasattr(last_index_item, 'strftime'): # If it's already a Timestamp (e.g., DatetimeIndex)
+                        date_obj_to_format = last_index_item
+                    
+                    if hasattr(date_obj_to_format, 'strftime'):
+                        last_available_date_str = date_obj_to_format.strftime('%Y-%m-%d')
+                    elif date_obj_to_format is not None:
+                        self.logger.warning(f"[{self.__class__.__name__}] Date object for formatting (last available date) is not a Timestamp: {type(date_obj_to_format)}. Logging as string: {str(date_obj_to_format)}")
+                        last_available_date_str = str(date_obj_to_format)
+                    else:
+                        self.logger.warning(f"[{self.__class__.__name__}] Could not determine a valid date object from last_index_item: {last_index_item}")
+
+                self.logger.info(f"[{self.__class__.__name__}] Successfully fetched {latest_data_df.shape[0]} data points for {symbol}. Last available date from raw fetch: {last_available_date_str}.")
                 
                 # The fetched data might have a MultiIndex [('symbol', 'date')]
                 # Select data for the current symbol if it's a MultiIndex
@@ -335,7 +354,7 @@ class EnhancedStockPredictor:
                         "predictions": denormalized_predictions_list, # List of floats
                         "uncertainties": uncertainties_array, # List of floats
                         "predicted_at": datetime.now(pytz.utc).isoformat(),
-                        "last_actual_date": latest_data_df.index[-1].strftime('%Y-%m-%d') if not latest_data_df.empty else None
+                        "last_actual_date": last_available_date_str
                     }
                     
                 except ValueError as ve:
