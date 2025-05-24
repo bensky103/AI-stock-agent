@@ -233,6 +233,18 @@ class FeatureEngineer:
         logger.debug(f"===== FeatureEngineer: No scaler found for '{symbol if symbol else 'global'}' to check if fitted. =====")
         return False
 
+    def _get_scaler(self, symbol: Optional[str] = None) -> Optional[RobustScaler]:
+        """Retrieves the appropriate scaler (symbol-specific or global)."""
+        if symbol and symbol in self.scalers:
+            logger.debug(f"===== FeatureEngineer: Retrieving scaler for symbol '{symbol}'. =====")
+            return self.scalers[symbol]
+        elif self.global_scaler is not None:
+            logger.debug("===== FeatureEngineer: Retrieving global scaler. =====")
+            return self.global_scaler
+        
+        logger.warning(f"===== FeatureEngineer: No scaler available (neither for symbol '{symbol}' nor global). Requested scaler but none found. =====")
+        return None
+
     def _convert_column_names(self, df: pd.DataFrame) -> pd.DataFrame:
         """Converts column names to lowercase and replaces spaces with underscores."""
         if isinstance(df.columns, pd.MultiIndex):
