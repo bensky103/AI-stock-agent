@@ -527,13 +527,44 @@ class FeatureEngineer:
         # If fitting scalers, we might drop initial NaNs.
         # If for prediction, we need to be careful as the last row is most important.
         if fit_scalers:
-            # Drop rows with any NaNs if fitting scalers, as they can't be used for fitting.
-            # This assumes that sufficient data is provided so that after dropping initial NaNs,
-            # there's still enough data to fit scalers robustly.
-            df.dropna(inplace=True) # StockFormatter might have specific NaN handling
-            logger.info(f"===== FeatureEngineer: Dropped {nan_rows_initial - df.isnull().any(axis=1).sum()} rows with NaNs because fit_scalers=True. Shape after drop: {df.shape}. =====")
-            if df.empty and nan_rows_initial > 0: # All rows were NaN
-                 logger.error(f"===== FeatureEngineer: All rows contained NaNs after TA calculation and fit_scalers=True. Cannot proceed for symbol '{symbol}'. Check input data length and TA lookback periods. =====")
+            # Columns that are intentionally all NaN if data isn't found for them.
+            # These should not cause all rows to be dropped if other features are valid.
+            placeholder_fundamental_cols = ['market_cap', 'pe_ratio', 'dividend_yield']
+            
+            # Columns to check for NaNs before dropping rows for scaler fitting.
+            # Exclude the placeholder fundamental columns from this check.
+            cols_for_dropna_check = [col for col in df.columns if col not in placeholder_fundamental_cols]
+
+            if not df.empty: # Proceed only if df is not already empty
+                if not cols_for_dropna_check:
+                    # This case means df might only contain placeholder_fundamental_cols or is structured unexpectedly.
+                    # A full dropna here would behave like the original problematic code if placeholder_fundamental_cols are all NaN.
+                    # If df only had placeholder columns, all would be dropped.
+                    # If it had other columns that were all NaN, they'd also be dropped.
+                    # This is an edge case; ideally, cols_for_dropna_check should not be empty if df has TA features.
+                    logger.warning(
+                        f"===== FeatureEngineer: No columns identified for subset dropna (excluding {placeholder_fundamental_cols}) "
+                        f"during scaler fitting for symbol '{symbol}'. DataFrame columns: {df.columns.tolist()}. "
+                        f"Falling back to dropping rows with any NaN. This might drop all rows if placeholders are all NaN."
+                    )
+                    # Record current number of rows before full dropna
+                    rows_before_fallback_dropna = len(df)
+                    df.dropna(inplace=True)
+                    rows_after_fallback_dropna = len(df)
+                    if rows_before_fallback_dropna > 0 and rows_after_fallback_dropna == 0:
+                        logger.error(f"===== FeatureEngineer: Fallback dropna removed all rows for symbol '{symbol}'. This was likely due to all-NaN placeholder columns not being excluded from a targeted dropna because cols_for_dropna_check was empty. =====")
+
+                else:
+                    # Drop rows only if NaNs exist in the TA-related columns (cols_for_dropna_check)
+                    # This preserves rows even if placeholder_fundamental_cols have NaNs, as long as TA features are fine.
+                    df.dropna(subset=cols_for_dropna_check, inplace=True)
+                
+                logger.info(f"===== FeatureEngineer: Shape after dropna for scaler fitting for symbol '{symbol}': {df.shape}. =====")
+            else: # df was already empty before dropna
+                 logger.info(f"===== FeatureEngineer: DataFrame for symbol '{symbol}' was already empty before attempting dropna for scaler fitting. =====")
+
+            if df.empty: # Check if df became empty after dropna or was already empty
+                 logger.error(f"===== FeatureEngineer: DataFrame is empty after processing for scaler fitting for symbol '{symbol}'. Cannot proceed to fit scaler. Check input data length, TA lookbacks, and content of non-fundamental features. =====")
                  return None, last_close_price
 
 
