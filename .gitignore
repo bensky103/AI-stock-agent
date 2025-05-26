@@ -1,0 +1,35 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Environment
+.venv/
+.env
+.env.*
+.git
+
+# Build & Packaging
+build/
+dist/
+*.egg-info/
+
+# IDEs & Editors
+.vscode/
+.DS_Store
+
+# Node (if ever used)
+node_modules/
+
+#Debug files
+pytest.txt
+
+logs
+logs/market_feed.log
+logs/
+gpush.sh
+pymain.sh
+gitpull.sh
+AI_prompt.txt
+saved_models/predictions.csv
+saved_models

@@ -1,0 +1,160 @@
+# Test Configuration
+
+# Market Data Configuration
+market_data:
+  symbols:
+    - AAPL
+    - MSFT
+  intervals:
+    - 1d
+  features:
+    - open
+    - high
+    - low
+    - close
+    - volume
+  technical_indicators:
+    - sma_20
+    - sma_50
+    - rsi_14
+    - macd
+
+# Sentiment Analysis Configuration
+sentiment:
+  sources:
+    twitter:
+      enabled: true
+      max_tweets: 10
+      min_retweets: 2
+      languages:
+        - en
+    reddit:
+      enabled: true
+      subreddits:
+        - wallstreetbets
+        - stocks
+      min_score: 5
+      max_comments: 10
+  aggregation:
+    window: 1d
+    min_sources: 1
+    weight_twitter: 0.6
+    weight_reddit: 0.4
+
+# Model Configuration
+model:
+  tft:
+    sequence_length: 20
+    prediction_horizon: 5
+    hidden_size: 64
+    num_heads: 4
+    num_layers: 2
+    dropout: 0.1
+    attention_dropout: 0.1
+    hidden_continuous_size: 32
+    loss: mse
+    learning_rate: 0.001
+    batch_size: 32
+    max_epochs: 100
+    early_stopping_patience: 10
+    validation_split: 0.2
+  training:
+    batch_size: 32
+    learning_rate: 0.001
+    max_epochs: 100
+    early_stopping_patience: 10
+    validation_split: 0.2
+  prediction:
+    horizon: 5
+    confidence_threshold: 0.6
+  retraining:
+    frequency: 1d
+    min_data_points: 100
+    trigger_conditions:
+      - accuracy_drop: 0.05
+      - new_data_ratio: 0.2
+
+# Trading Rules
+trading_rules:
+  entry:
+    min_confidence: 0.6
+    min_volume: 100000
+    min_price: 5.0
+    max_spread: 0.02
+    required_indicators:
+      - trend
+      - momentum
+  exit:
+    stop_loss: 0.05
+    take_profit: 0.1
+    trailing_stop: 0.03
+    max_holding_period: 2d
+  position_sizing:
+    max_position_size: 0.1
+    max_portfolio_risk: 0.02
+    position_sizing_method: kelly
+
+# Risk Management
+risk_management:
+  max_portfolio_risk: 0.02
+  max_position_risk: 0.01
+  max_correlation: 0.7
+  min_diversification: 3
+  stop_loss:
+    initial: 0.05
+    trailing: 0.03
+  position_limits:
+    max_positions: 5
+    min_positions: 1
+    rebalance_threshold: 0.1
+
+# Execution Settings
+execution:
+  mode: paper  # paper or live
+  broker: alpaca  # alpaca or other
+  order_types:
+    - market
+    - limit
+  retry:
+    max_attempts: 3
+    delay: 1
+  validation:
+    price_deviation: 0.02
+    min_volume: 1000
+
+# Monitoring Configuration
+monitoring:
+  metrics:
+    - accuracy
+    - returns
+    - drawdown
+    - sharpe_ratio
+  alerts:
+    enabled: false
+    channels:
+      - telegram
+    thresholds:
+      drawdown: 0.05
+      accuracy_drop: 0.1
+  logging:
+    level: INFO
+    file: logs/test_trading.log
+    max_size: 1048576  # 1MB
+    backup_count: 2
+
+# Backtesting Configuration
+backtesting:
+  start_date: 2023-01-01
+  end_date: 2023-12-31
+  initial_capital: 100000
+  transaction_cost: 0.001
+  scenarios:
+    - name: bull_market
+      start_date: 2023-01-01
+      end_date: 2023-03-31
+    - name: bear_market
+      start_date: 2023-04-01
+      end_date: 2023-06-30
+    - name: volatile_market
+      start_date: 2023-07-01
+      end_date: 2023-09-30 

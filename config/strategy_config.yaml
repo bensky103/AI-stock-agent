@@ -1,0 +1,282 @@
+# Trading System Configuration
+
+# Market Data Configuration
+market_data:
+  symbols:
+    - TSLA
+    - AAPL
+    - MSFT
+    - GOOGL
+    - AMZN
+  intervals:
+    - 1d    # Daily data
+    - 1h    # Hourly data
+  features:
+    - open
+    - high
+    - low
+    - close
+    - volume
+  technical_indicators:
+    - sma_20
+    - sma_50
+    - sma_200
+    - rsi_14
+    - macd
+    - bollinger_bands
+    - atr_14
+    - obv
+
+# Sentiment Analysis Configuration
+sentiment:
+  sources:
+    twitter:
+      enabled: true
+      max_tweets: 100
+      min_retweets: 5
+      languages:
+        - en
+    reddit:
+      enabled: true
+      subreddits:
+        - wallstreetbets
+        - stocks
+        - investing
+      min_score: 10
+      max_comments: 100
+  aggregation:
+    window: 1d
+    min_sources: 1
+    weight_twitter: 0.6
+    weight_reddit: 0.4
+
+# Model Configuration
+model:
+  type: 'tft'  # Changed from lstm to tft
+  sequence_length: 30  # Moved up one level for direct access
+  hidden_size: 64
+  num_layers: 2
+  dropout: 0.2
+  prediction_horizon: 5  # Added for TFT model
+  training:
+    batch_size: 32
+    learning_rate: 0.001
+    max_epochs: 100
+    early_stopping_patience: 10
+    validation_split: 0.2
+  prediction:
+    horizon: 1
+    confidence_threshold: 0.7
+  retraining:
+    frequency: 7d
+    min_data_points: 1000
+    trigger_conditions:
+      - accuracy_drop: 0.05
+      - new_data_ratio: 0.2
+
+# Trading Rules
+trading_rules:
+  entry:
+    min_confidence: 0.7
+    min_volume: 1000000
+    min_price: 5.0
+    max_spread: 0.02
+    required_indicators:
+      - trend
+      - momentum
+      - volume
+  exit:
+    stop_loss: 0.05
+    take_profit: 0.1
+    trailing_stop: 0.03
+    max_holding_period: 5d
+  position_sizing:
+    max_position_size: 0.1
+    max_portfolio_risk: 0.02
+    position_sizing_method: kelly
+
+# Risk Management Configuration
+risk_management_settings:
+  max_portfolio_risk: 0.02
+  max_drawdown: 0.15
+  max_correlation: 0.7
+  max_open_positions: 5    # Maximum number of concurrent positions
+  max_sector_exposure: 0.3  # Maximum exposure to a single sector
+  max_symbol_exposure: 0.2  # Maximum exposure to a single symbol  
+  diversification:
+    min_positions: 3
+    max_sector_exposure: 0.3
+    max_single_position: 0.2
+  volatility_adjustment:
+    enabled: true
+    lookback_period: 20
+    target_volatility: 0.15
+    regime_based: true  # Adjust based on market regime
+
+# Execution Settings
+execution_settings:
+  mode: paper_trading  # paper_trading or live_trading
+  broker: alpaca
+  order_types:
+    - market
+    - limit
+    - stop
+    - stop_limit
+  default_slippage: 0.001
+  retry_attempts: 3
+  retry_delay: 1
+  slippage_model: proportional  # Options: fixed, proportional
+  slippage_pct: 0.001          # Slippage percentage
+  commission_model: per_share   # Options: fixed, per_share, percentage
+  commission_rate: 0.001       # Commission rate
+  min_trade_size: 100          # Minimum trade size in shares
+  max_trade_size: 10000        # Maximum trade size in shares
+  time_in_force: GTC           # Good Till Cancelled
+
+# Monitoring Configuration
+monitoring_settings:
+  metrics:
+    - accuracy
+    - returns
+    - sharpe_ratio
+    - max_drawdown
+    - win_rate
+    - profit_factor
+    - sortino_ratio
+    - calmar_ratio
+    - alpha
+    - beta
+  alerts:
+    email:
+      enabled: true
+      recipients:
+        - your.email@example.com
+    telegram:
+      enabled: false
+      bot_token: ""
+      chat_id: ""
+    drawdown_threshold: 0.05
+    position_limit_threshold: 0.9
+    volatility_threshold: 0.3
+    regime_change_threshold: 0.5
+  logging:
+    level: WARNING
+    file: logs/trading_system.log
+    max_size: 10485760  # 10MB
+    backup_count: 5
+
+# Backtesting Configuration
+backtesting_settings:
+  start_date: 2023-01-01
+  end_date: 2024-01-31
+  initial_capital: 100000
+  transaction_cost: 0.001
+  performance_benchmark: SPY  # Benchmark for performance comparison
+  scenarios:
+    - name: bull_market
+      start_date: 2023-01-01
+      end_date: 2023-06-30
+    - name: bear_market
+      start_date: 2023-07-01
+      end_date: 2023-12-31
+    - name: volatile_market
+      start_date: 2024-01-01
+      end_date: 2024-01-31
+    - name: normal
+      volatility_multiplier: 1.0
+    - name: high_volatility
+      volatility_multiplier: 1.5
+    - name: low_volatility
+      volatility_multiplier: 0.7
+
+# Trading Strategy Configuration
+
+# Strategy Selection
+strategy:
+  name: ml_hybrid  # Options: ml_hybrid, mean_reversion, trend_following
+  parameters:
+    signal_threshold: 0.3
+    weights:
+      ml: 0.4
+      technical: 0.4
+      regime: 0.2
+    technical_indicators:
+      rsi:
+        overbought: 70
+        oversold: 30
+      macd:
+        fast_period: 12
+        slow_period: 26
+        signal_period: 9
+      moving_averages:
+        short_period: 20
+        long_period: 50
+      volume:
+        ma_period: 20
+        threshold: 1.5
+
+# Position Management
+position_management:
+  max_position_size: 0.1  # Maximum position size as fraction of portfolio
+  max_drawdown: 0.05      # Maximum drawdown allowed
+  stop_loss_pct: 0.02     # Default stop loss percentage
+  take_profit_pct: 0.04   # Default take profit percentage
+  trailing_stop: true      # Use trailing stop loss
+  trailing_stop_pct: 0.01  # Trailing stop percentage
+  lot_sizes:              # Symbol-specific lot sizes
+    AAPL: 1
+    MSFT: 1
+    GOOGL: 1
+    AMZN: 1
+    TSLA: 1
+
+# Output Configuration
+output:
+  predictions_path: saved_models/predictions.csv
+  reports_path: reports/
+  charts_path: charts/
+
+# Market Regime Detection
+market_regime:
+  volatility_threshold: 0.2  # Threshold for high volatility regime
+  trend_threshold: 0.6      # Threshold for trend strength
+  regime_window: 20         # Window for regime calculation
+  indicators:
+    - name: volatility
+      weight: 0.4
+    - name: trend
+      weight: 0.3
+    - name: volume
+      weight: 0.3
+
+# Technical Analysis
+technical_analysis:
+  indicators:
+    rsi:
+      period: 14
+      overbought: 70
+      oversold: 30
+    macd:
+      fast_period: 12
+      slow_period: 26
+      signal_period: 9
+    bollinger_bands:
+      period: 20
+      std_dev: 2
+    atr:
+      period: 14
+    volume_profile:
+      period: 20
+      threshold: 1.5
+
+# Portfolio Optimization
+portfolio_optimization:
+  rebalance_frequency: 1d  # Daily rebalancing
+  optimization_method: risk_parity  # Options: equal_weight, risk_parity, mean_variance
+  risk_free_rate: 0.02    # Risk-free rate for Sharpe ratio
+  max_leverage: 1.0       # Maximum portfolio leverage
+  constraints:
+    min_position_size: 0.05
+    max_position_size: 0.2
+    min_sector_weight: 0.1
+    max_sector_weight: 0.3

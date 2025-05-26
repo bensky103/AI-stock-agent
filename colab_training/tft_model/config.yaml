@@ -1,0 +1,11 @@
+best_epoch: 0
+best_val_loss: .inf
+model_config:
+  attention_head_size: 8
+  dropout_rate: 0.1
+  hidden_layer_size: 128
+  learning_rate: 0.0005
+  max_gradient_norm: 0.01
+  num_encoder_steps: 30
+  num_steps: 5
+training_history: []
